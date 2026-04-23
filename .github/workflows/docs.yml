@@ -34,7 +34,12 @@ jobs:
       - name: Install pdflatex
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends texlive-latex-base texlive-latex-extra texlive-fonts-recommended
+          sudo apt-get install -y --no-install-recommends \
+            texlive-latex-base \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-fonts-extra \
+            cm-super
 
       - name: Build messaging-specification.pdf (two-pass)
         run: |
