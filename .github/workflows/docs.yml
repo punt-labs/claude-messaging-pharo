@@ -32,13 +32,16 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install pdflatex
+        # cm-super provides scalable Type 1 Computer Modern fonts required
+        # by microtype's font-expansion feature. Without it, pdflatex fails
+        # with "auto expansion is only possible with scalable fonts" because
+        # texlive-fonts-recommended ships only bitmap (pk) fonts.
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             texlive-latex-base \
             texlive-latex-extra \
             texlive-fonts-recommended \
-            texlive-fonts-extra \
             cm-super
 
       - name: Build messaging-specification.pdf (two-pass)
