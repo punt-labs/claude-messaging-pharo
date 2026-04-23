@@ -1,0 +1,3882 @@
+%
+% messaging-specification.tex
+% Compile: pdflatex messaging-specification.tex
+%
+
+\documentclass[a4paper,10pt,fleqn]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{microtype}
+
+\setlength{\parskip}{0.7\baselineskip plus 0.2\baselineskip minus 0.1\baselineskip}
+\setlength{\parindent}{0pt}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue!80!black},
+  commentstyle=\color{green!50!black},
+  stringstyle=\color{red!60!black},
+  breaklines=true,
+  frame=single,
+  framerule=0.3pt,
+  rulecolor=\color{gray!50},
+  backgroundcolor=\color{gray!5},
+  columns=fullflexible,
+}
+
+\newcommand{\cls}[1]{\texttt{#1}}
+\newcommand{\sel}[1]{\texttt{\##1}}
+\newcommand{\pkg}[1]{\texttt{#1}}
+\newcommand{\goref}[1]{\textsf{\small [Go: #1]}}
+
+\begin{document}
+
+\title{Claude Messaging SDK for Pharo:\\Technical Specification}
+\author{Punt Labs}
+\date{April 2026 --- v0.3.0-dev}
+\hypersetup{
+  pdftitle={Claude Messaging SDK for Pharo: Technical Specification},
+  pdfauthor={Punt Labs},
+  pdfsubject={Messaging SDK Specification},
+  pdfcreator={pdflatex}
+}
+\maketitle
+
+\tableofcontents
+\newpage
+
+\subsection*{About this Specification}
+
+Section order mirrors Anthropic's Messages API docs
+(\url{https://docs.claude.com/en/api/messages}).  Unimplemented
+surface is marked \textbf{Gap (Phase 2)}; see
+\texttt{messaging-specification-gap-analysis.md}.  Pharo-specific
+implementation notes live in
+\emph{messaging-specification-pharo-notes.tex}.  The Agent layer
+(tool runner, sub-agents, dashboard) is in the separate
+\emph{Claude Agent SDK for Pharo --- Technical Specification}.
+
+
+\part{Learn about Claude}
+
+\section{Overview}
+\label{sec:overview}
+
+Anthropic's Messages API is the primary endpoint for chat-style
+generation against Claude models.  A caller sends an ordered list
+of user and assistant turns; the API returns a typed response
+carrying assistant text, tool-use blocks, citations, stop reason,
+and token usage.  Streaming is a transport variant of the same
+shape, delivering the response as Server-Sent Events (SSE).
+Synchronous chat-style generation, tool-use loops, and streaming
+interactions route through this endpoint; asynchronous batch
+processing reuses the Messages request shape but submits via the
+Batches API instead.  The other endpoint families --- Files,
+Skills, Admin, Batches, Prompt Tools, Models, and Count Tokens
+--- live as separate surfaces that compose with Messages or
+stand alone.
+
+The API is built for the workloads people actually run against
+Claude: agents that loop tool calls back into the model, copilots
+that assist a developer in an editor, chat UIs that hold a
+turn-based conversation, retrieval-augmented generation pipelines
+that ground answers in fetched documents, document Q\&A,
+classification, summarization, structured extraction, and content
+generation.  It is also the backbone for the rest of Anthropic's
+platform: server-side tools attach via the \texttt{tools} array
+in the request body (no beta), MCP connectors attach via both the
+\texttt{mcp\_servers} request body field and the
+\texttt{mcp-client-2025-04-04} beta header, and Files and Skills
+attach via their own beta headers (\texttt{files-api-2025-04-14},
+\texttt{skills-2025-10-02}) that opt the request into a feature group.
+
+The Claude Messaging SDK for Pharo is a Smalltalk client for
+that API, running inside a live Pharo~12 image.  It
+gives a Smalltalker the same surface a Python or TypeScript developer
+gets from the first-party SDKs --- build a message, send it, read
+Claude's response as a typed object --- while keeping to idiomatic
+Smalltalk conventions throughout: fluid class syntax, typed hierarchies
+instead of dictionaries, \texttt{>>>} doctest examples, Iceberg-managed
+Tonel packages.  The SDK ships in two layers.  This document specifies
+the \emph{Messaging layer}: \texttt{ClaudeClient}, the
+\texttt{ClaudeMessage} / \texttt{ClaudeContentBlock} hierarchy, the
+error classes, the streaming decoder, the beta-gated APIs (Files,
+Skills, MCP).  The \emph{Agent layer} --- tool runner, sub-agents,
+dashboard, rate limiter --- builds on this surface and is described in
+the separate \emph{Claude Agent SDK for Pharo} specification.
+
+The SDK covers the public Messages API endpoints at
+\texttt{https://api.anthropic.com} (configurable via \texttt{baseUrl}
+on \texttt{ClaudeClient} for proxies or mocks): \texttt{POST
+/v1/messages} for creating messages (streaming and non-streaming),
+\texttt{POST /v1/messages/count\_tokens} for token counting,
+\texttt{GET /v1/models} and \texttt{/v1/models/\{id\}} for model
+discovery, and the Files API endpoints (\texttt{/v1/files} for upload,
+list, get, download, and delete).  The endpoint map in full:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Endpoint} & \textbf{Method} & \textbf{Description} \\
+\midrule
+\texttt{/v1/messages}              & POST & Create message (streaming and non-streaming) \\
+\texttt{/v1/messages/count\_tokens} & POST & Count tokens for a message \\
+\texttt{/v1/models}                & GET  & List available models \\
+\texttt{/v1/models/\{id\}}        & GET  & Get model details \\
+\texttt{/v1/files}               & POST & Upload a file \\
+\texttt{/v1/files}               & GET  & List uploaded files \\
+\texttt{/v1/files/\{id\}}        & GET  & Get file metadata \\
+\texttt{/v1/files/\{id\}/content} & GET & Download file content \\
+\texttt{/v1/files/\{id\}}        & DELETE & Delete a file \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The example below is the canonical first SDK call: build a client with
+an API key, build a request with a model and a user message, send it,
+and read the text off the response.  Every later section elaborates on
+one piece of this shape --- request options, streaming, tool use,
+prompt caching, thinking --- but a reader who gets this example running
+has the whole SDK in hand.  The example evaluates to Claude's reply
+text as a String:
+
+\begin{lstlisting}[language={}]
+| client request response |
+"Build a client (see ClaudeSDKExampleSupport resolveClient for keyring
+ resolution in scripts; the apiKey: factory is the minimal shape)."
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+"Build a request: model, max tokens, one user turn."
+request := ClaudeMessageRequest new
+    model: ClaudeModel opus46;
+    maxTokens: 1024;
+    addUserMessage: 'Write a haiku about Smalltalk.';
+    yourself.
+
+"Synchronous POST to /v1/messages; returns a ClaudeMessage."
+response := client sendMessage: request.
+
+"textContent joins all text blocks into a single String."
+response textContent
+\end{lstlisting}
+
+Pharo-specific implementation notes --- threading discipline around
+the Morphic UI, Iceberg / Tonel packaging, image save and restore
+behavior, supervised process patterns --- live in the companion
+document \emph{Claude Messaging SDK for Pharo: Pharo-Specific
+Implementation Notes}.
+
+For the full shape of the Messages API surface see
+\S\ref{sec:messages}; for streaming see \S\ref{sec:streaming}; for
+thinking see \S\ref{sec:thinking}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/messages}.}}
+
+\section{Design Goals}
+\label{sec:design-goals}
+
+The SDK is shaped by four commitments that trade off against each
+other in predictable ways: parity with the Messages API defines the
+surface, idiomatic Smalltalk defines the style, Pharo-safe threading
+defines the concurrency contract, and a minimal dependency footprint
+keeps the package graph light enough to load into any Pharo~12 image.
+The numbered list below names each commitment and the specific choices
+that follow from it.
+
+\begin{enumerate}[label=\textbf{G\arabic*}.]
+  \item \textbf{Feature parity with Anthropic's Messages API.}  Every
+    v1.0 Pharo-scope feature in \S\ref{sec:scope} maps to a typed
+    Smalltalk surface: the Messages API itself (send, stream, tool
+    use), the streaming decoder, models API, token counting, the error
+    hierarchy, core options, extended thinking, citations, server tool
+    results, server-side tools, the MCP connector, Skills API, Files
+    API, output encoding, and the message-decomposition primitives
+    (turn, stop details, request context, container).  Both stable and
+    beta APIs ship together --- beta headers are managed per
+    \S\ref{sec:beta-headers}, automatic for Files and Skills, opt-in
+    via \sel{betas:} for others --- so a caller can reach the full
+    v1.0 surface without conditional code paths.
+  \item \textbf{Idiomatic Smalltalk.}  Follow Kent Beck's
+    \emph{Smalltalk Best Practice Patterns}: composed methods,
+    intention-revealing selectors, pluggable behavior, collecting
+    parameters.  Use the class hierarchy to carry type information
+    rather than dictionaries or type tags --- \texttt{ClaudeMessage}
+    and \texttt{ClaudeContentBlock} are families with polymorphic
+    dispatch, not schema-bag records.  JSON serialization is explicit
+    (\texttt{asJson} / \texttt{fromJson:} with a \texttt{jsonKeyMap})
+    rather than reflective.  The SDK should read like Smalltalk to a
+    Smalltalker.
+  \item \textbf{Pharo-safe threading.}  Network I/O must never block
+    the Morphic UI thread.  The SDK itself is synchronous, so every
+    caller knows exactly which selectors block and for how long; all
+    blocking operations are documented so consumers know what to fork
+    with \texttt{forkAt:} and what to defer back to the UI via
+    \texttt{WorldState defer:}.  The companion Pharo-notes document
+    covers the forking patterns.
+  \item \textbf{Minimal dependencies.}  Use only Pharo's built-in
+    libraries: Zinc for HTTP, STONJSON for JSON, and the standard
+    collections.  No external Metacello baselines, no FFI to OS
+    libraries from the Messaging layer.  The SDK loads into a stock
+    Pharo~12 image by filing in the \texttt{Claude-Messaging-*} Tonel
+    packages from \texttt{src/} (driven by \texttt{make setup} /
+    \texttt{make filein}, which use \texttt{TonelReader} and
+    \texttt{MCPackageLoader}); per-product Metacello baselines are
+    future work.
+\end{enumerate}
+
+This section is reference material; no runnable example applies.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.}}
+
+\section{Scope}
+\label{sec:scope}
+
+This SDK covers the public Messages API plus the beta APIs that
+stabilized as of v1.0.  The table below enumerates each feature with
+its v1.0 Pharo scope and the version the Pharo surface landed in.
+Features marked for a later version column ship later --- the SDK
+reserves version slots so callers can track when a surface becomes
+available rather than guessing from a changelog.  Features marked
+\emph{Out of scope} belong to adjacent Anthropic surfaces (Bedrock,
+Vertex, legacy completions) or to the Agent layer; the scope boundary
+is deliberate and documented per row.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lYl@{}}
+\toprule
+\textbf{Feature} & \textbf{Smalltalk Scope} & \textbf{Version} \\
+\midrule
+Messages API          & Full (send, stream, tool use)        & v1 \\
+Streaming (SSE)       & Full (decoder, events, accumulator)  & v1 \\
+Models API            & List, get, model info type           & v1 \\
+Token counting        & CountTokens method and return type   & v1 \\
+Error handling        & Full hierarchy, retry, rate limits   & v1 \\
+Options system        & Core options (key, URL, timeout)     & v1 \\
+Extended thinking     & ThinkingConfig, thinking blocks, redacted & v1 \\
+Citations             & Citation types on TextBlock          & v1 \\
+Server tool results   & Read-only response types             & v1 \\
+Server-side tools     & Full (web search, web fetch, code exec, bash, text editor, memory, tool search) & v1 \\
+MCP connector         & Full (request param + response content blocks) & v1 \\
+Skills API            & Full (CRUD + versions + container loading + multipart upload) & v1 \\
+Files API             & Full (upload, list, get, download, delete) & v1 \\
+Output encoding       & Text output format (encoding + markup) & v1 \\
+Message decomposition & Turn, stop details, request context, container & v1 \\
+Tool runner           & See \emph{Claude Agent SDK Specification} & v1 \\
+Message batches       & Not yet implemented                  & v2 \\
+Bedrock / Vertex      & Out of scope                         & --- \\
+Completions (legacy)  & Out of scope                         & --- \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+The Batches API row is tracked against the full specification in
+\S\ref{sec:batches}; the Files API lands in \S\ref{sec:files}.
+
+This section is reference material; no runnable example applies.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/messages}.}}
+
+\part{API Reference}
+
+\section{Messages API}
+\label{sec:messages}
+
+The Messages API is Claude's primary generation endpoint --- every
+synchronous chat-style interaction, tool-use loop, and streaming
+response rides on \texttt{POST /v1/messages}.  The Pharo SDK
+exposes that endpoint through three collaborating objects:
+\texttt{ClaudeClient} holds authentication and connection
+configuration, \texttt{ClaudeMessageRequest} builds the request
+body (model, messages, options), and \texttt{ClaudeMessage}
+comes back as the typed response.  Any synchronous chat-style
+generation, tool-use loop, or streaming interaction routes through
+here; asynchronous batch processing reuses the same Messages request
+shape but submits via the Batches API endpoints instead.  The other
+endpoint families (Files, Skills, Admin, Batches, Prompt Tools,
+Models, Count Tokens) live as separate HTTP endpoint surfaces that
+compose with Messages or stand alone.  Thinking, tool use,
+streaming, prompt caching, and citations are all features
+layered on top of a Messages request.
+
+A \texttt{ClaudeClient} is cheap to build and meant to be reused.
+The simplest form takes an API key; the three-keyword factory
+adds a base URL override (for proxies or mock servers) and a
+timeout.  \texttt{fromEnvironment} reads the
+\texttt{ANTHROPIC\_API\_KEY} variable via \texttt{Smalltalk os
+environment} and raises if it is unset --- useful for scripts
+and CI runners where the key is injected from outside the image.
+
+\begin{lstlisting}[language={}]
+"Explicit API key."
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+"From environment variable ANTHROPIC_API_KEY."
+client := ClaudeClient fromEnvironment.
+
+"With a proxy or mock server URL plus a tighter timeout."
+client := ClaudeClient
+    apiKey: 'sk-ant-...'
+    baseUrl: 'https://custom-proxy.example.com'
+    timeout: 120.
+\end{lstlisting}
+
+The client's configuration lives in eight instance variables, all
+with defaults set by \texttt{initialize}:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{5.5cm}@{}}
+\toprule
+\textbf{Variable} & \textbf{Type} & \textbf{Default} \\
+\midrule
+\texttt{apiKey}    & String   & From \sel{apiKey:} argument or \texttt{fromEnvironment} \\
+\texttt{baseUrl}   & String   & \texttt{https://api.anthropic.com} \\
+\texttt{apiVersion} & String  & \texttt{2023-06-01} \\
+\texttt{timeout}   & Integer  & 120 (seconds); used for non-streaming requests \\
+\texttt{streamingTimeout} & Integer & 300 (seconds); used for \sel{streamMessage:do:}
+  and as the socket read timeout in \sel{openStreamingSocket:} \\
+\texttt{maxRetries} & Integer & 5 \\
+\texttt{rateLimiter} & \cls{ClaudeRateLimiter} or nil & Optional
+  shared rate limiter; populated when the client joins an Agent-layer
+  rate limiter \\
+\texttt{debugLogBlock} & Block or nil & Optional callable that
+  receives a Dictionary per request and response event (keys
+  \texttt{\#direction}, \texttt{\#url}, \texttt{\#body},
+  \texttt{\#status}). Wire with \sel{debugLog:}. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A fresh \texttt{ZnClient} is created for each request rather than
+pooled, so every call performs its own TCP/TLS handshake.  That
+is acceptable for an API whose typical conversation turn makes
+one to five requests; it also means \texttt{ClaudeClient} survives
+Pharo image save without special handling --- no connections are
+held across save.  A process that was mid-request at save time
+wakes up on a broken socket after restore; long-running consumers
+should guard their network forks accordingly.
+
+\subsection{Request Lifecycle}
+\label{sec:request-lifecycle}
+
+Every Messages request follows the same seven-step pipeline, and
+understanding it is how you reason about retry, timeout, and
+error shape.  The request object is serialized to JSON with
+\texttt{STONJSON toString:}; a fresh \texttt{ZnClient} is
+configured with \texttt{x-api-key}, \texttt{anthropic-version:
+2023-06-01}, \texttt{content-type: application/json}, and
+\texttt{accept: application/json}; the POST fires; any non-2xx
+response is inspected for retry eligibility and either retried
+with backoff (see \S\ref{sec:errors}) or raised as a typed
+\texttt{ClaudeApiError} subclass; the response body is parsed
+with \texttt{STONJSON fromString:}; the resulting dictionary is
+handed to \texttt{ClaudeMessage class>>fromJson:}; and the typed
+\texttt{ClaudeMessage} comes back to the caller.  The HTTP POST
+and response-parse steps are blocking network I/O.  The SDK
+itself never forks --- consumers choose the concurrency strategy
+that fits their application, which means a call from the Morphic
+UI thread must be wrapped in \texttt{forkAt:} to avoid locking
+the UI for the duration of the request.
+
+\subsection{Sending a Message}
+
+The end-to-end example below covers the \texttt{sendMessage:}
+path against a \texttt{ClaudeMockServer} so it runs without an
+API key or network.  Real code swaps the mock for
+\texttt{ClaudeSDKExampleSupport resolveClient} and removes the
+\texttt{baseUrl:} override.  The request exercises three
+delegated setters beyond \S\ref{sec:overview}'s minimal hello
+call: a system prompt, a sampling temperature, and a metadata
+tag that the server echoes in usage analytics.  The example
+evaluates to an array with three fields pulled off the typed
+response --- text, stop reason symbol, and input-token count:
+
+\begin{lstlisting}[language={}]
+| server client request response |
+"Spin up an in-image mock HTTP server so the example needs neither network nor API key."
+server := ClaudeMockServer startOn: 0.
+[ "Register the canned response for POST /v1/messages."
+  server
+    respondTo: '/v1/messages'
+    with: '{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"2 plus 2 is 4."}],"model":"claude-sonnet-4-5","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":18,"output_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}'.
+  "Build a ClaudeClient that talks to the mock."
+  client := ClaudeClient
+    apiKey: 'test-key'
+    baseUrl: 'http://localhost:' , server port printString
+    timeout: 5.
+  "Build the request with a system prompt, a low temperature, and a metadata tag."
+  request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet45;
+    maxTokens: 256;
+    system: 'You are a concise arithmetic tutor.';
+    temperature: 0.0;
+    metadata: (Dictionary newFromPairs: { 'user_id'. 'example-reader' });
+    addUserMessage: 'What is 2 + 2?';
+    yourself.
+  "Synchronous POST to /v1/messages; returns a ClaudeMessage."
+  response := client sendMessage: request.
+  ^ { response textContent. response stopReason. response usage inputTokens } ]
+    ensure: [ server stop ]  "Always stop the mock, even on error."
+"=> #('2 plus 2 is 4.' #end_turn 18)"
+\end{lstlisting}
+
+Application code wraps the \texttt{sendMessage:} call in an
+\texttt{on: ClaudeApiError do:} handler when it wants to react
+to specific error subclasses; for most callers the default
+behavior (raise the typed exception) is correct because
+retryable errors are already retried inside the client (see
+\S\ref{sec:errors}).
+
+\subsection{Request Parameters (ClaudeMessageRequest)}
+
+\cls{ClaudeMessageRequest} is the request body as a first-class
+Smalltalk object.  It holds the two required fields directly
+(\texttt{model}, \texttt{maxTokens}) along with the conversation
+turns and system prompt, and delegates optional parameters to
+five composite value objects.  Breaking the surface into
+composites (sampling knobs, tool parameters, thinking params,
+request options, output config) keeps the top-level class small
+enough to scan while letting each family of options evolve on
+its own schedule:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{6cm}@{}}
+\toprule
+\textbf{Variable} & \textbf{Type} & \textbf{Description} \\
+\midrule
+\texttt{model}          & String                     & Model ID (required) \\
+\texttt{maxTokens}      & Integer                    & Max output tokens (required) \\
+\texttt{messages}       & OrderedCollection          & Conversation turns \\
+\texttt{system}         & String or nil              & System prompt \\
+\texttt{sampling}       & \cls{ClaudeSamplingParams} or nil & Sampling knobs (temperature, topP, topK, stopSequences) \\
+\texttt{toolParams}     & \cls{ClaudeToolParams} or nil     & Tool declarations and tool-choice policy \\
+\texttt{thinkingParams} & \cls{ClaudeThinkingParams} or nil & Extended thinking mode (enabled, adaptive, disabled) \\
+\texttt{requestOptions} & \cls{ClaudeRequestOptions} or nil & Per-request controls (metadata, cache control, service tier, betas, MCP servers, container, etc.) \\
+\texttt{outputConfig}   & \cls{ClaudeOutputConfig} or nil   & Effort hint and output format (text or JSON schema) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The composites are initialized in \texttt{initialize}, so a
+bare \texttt{ClaudeMessageRequest new} already has empty
+sampling, tool, thinking, request-options, and output-config
+objects ready to accept setters.  Callers never need to
+instantiate the composites themselves; the request forwards the
+common setters directly, and each forwarded message sets the
+field on the right composite:
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{4.2cm}lp{4.8cm}@{}}
+\toprule
+\textbf{Selectors} & \textbf{Held by} & \textbf{Wire field(s)} \\
+\midrule
+\sel{temperature:} \sel{topP:} \sel{topK:} \sel{stopSequences:}
+   & \cls{ClaudeSamplingParams}
+   & \texttt{temperature}, \texttt{top\_p}, \texttt{top\_k}, \texttt{stop\_sequences} \\
+\sel{tools:} \sel{toolChoice:}
+   & \cls{ClaudeToolParams}
+   & \texttt{tools}, \texttt{tool\_choice} \\
+\sel{thinking:}
+   & \cls{ClaudeThinkingParams}
+   & \texttt{thinking} \\
+\sel{metadata:} \sel{cacheControl:} \sel{serviceTier:} \sel{inferenceGeo:} \sel{speed:} \sel{betas:} \sel{mcpServers:} \sel{container:} \sel{stream:}
+   & \cls{ClaudeRequestOptions}
+   & \texttt{metadata}, \texttt{cache\_control}, \texttt{service\_tier}, \texttt{inference\_geo}, \texttt{speed}, \texttt{anthropic-beta} header, \texttt{mcp\_servers}, \texttt{container}, \texttt{stream} \\
+\sel{outputFormat:} \sel{effort:}
+   & \cls{ClaudeOutputConfig}
+   & \texttt{output\_config.format}, \texttt{output\_config.effort} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Two fields do not live on the request even though new readers
+often expect them there.  The \texttt{strict} flag is per-tool
+and lives on \texttt{ClaudeTool>>strict:} (or on any
+\texttt{ClaudeServerTool} subclass), because strictness is a
+property of the tool schema the model is asked to honor, not of
+the request that carries it.  A server-assigned
+\texttt{requestId} is exposed response-side on
+\texttt{ClaudeRequestContext>>requestId} and reached via
+\texttt{message requestId}; the server fills it in, so it cannot
+exist on a request that has not yet been sent.
+
+Output encoding is a Pharo-specific convenience built on top of
+the system prompt rather than a wire field.
+\cls{ClaudeTextOutputFormat} combines two axes --- \texttt{encoding}
+(\sel{ascii}, \sel{latin1}, \sel{utf8}) and \texttt{markup}
+(\sel{plain}, \sel{microdown}, \sel{markdown}, \sel{json},
+\sel{html}, \sel{latex}) --- into a prompt suffix that asks the
+model to produce text in that shape.  The wire request carries
+no \texttt{output\_format} field for text output; only
+\texttt{json\_schema} has a dedicated wire surface.  Configure
+the format on the request and the SDK appends the suffix during
+\texttt{asJson}:
+
+\begin{lstlisting}[language={}]
+"Ask for UTF-8-encoded Markdown output."
+request outputFormat: (ClaudeTextOutputFormat new
+    encoding: #utf8;
+    markup: #markdown;
+    yourself).
+\end{lstlisting}
+
+Tool choice is a Dictionary that tells the model whether it may
+use tools, must use some tool, or must use one specific named
+tool.  The \texttt{auto} shape lets the model decide; the
+\texttt{any} shape forces a tool call without pinning which; the
+\texttt{tool} shape names the tool the model must call:
+
+\begin{lstlisting}[language={}]
+"Let the model decide (default)."
+request toolChoice: (Dictionary new at: 'type' put: 'auto'; yourself).
+
+"Force tool use without pinning which tool."
+request toolChoice: (Dictionary new at: 'type' put: 'any'; yourself).
+
+"Force one named tool."
+request toolChoice: (Dictionary new
+    at: 'type' put: 'tool';
+    at: 'name' put: 'get_weather';
+    yourself).
+\end{lstlisting}
+
+\cls{ClaudeThinkingParams} wraps the extended-thinking
+configuration.  Four class-side factories cover the modes:
+\sel{enabled:} turns thinking on with a token budget;
+\sel{adaptive} lets the model decide; \sel{adaptiveWithDisplay:}
+adds a display mode (\texttt{'summarized'} or \texttt{'full'});
+\sel{disabled} turns it off.  Pass the resulting Dictionary to
+\sel{thinking:} on the request:
+
+\begin{lstlisting}[language={}]
+"Always think, with a 10000-token budget."
+request thinking: (ClaudeThinkingParams enabled: 10000) asDictionary.
+
+"Let the model decide whether to think."
+request thinking: ClaudeThinkingParams adaptive asDictionary.
+
+"Adaptive with a display-mode hint."
+request thinking: (ClaudeThinkingParams adaptiveWithDisplay: 'summarized') asDictionary.
+
+"Thinking off."
+request thinking: ClaudeThinkingParams disabled asDictionary.
+\end{lstlisting}
+
+\begin{sloppypar}
+When thinking is enabled or adaptive, responses may contain
+\cls{ClaudeThinkingBlock} and \cls{ClaudeRedactedThinkingBlock}
+content blocks.  Redacted blocks appear when the API omits
+thinking content for safety reasons; they carry opaque
+\texttt{data} that callers must preserve when round-tripping
+conversations so the next request retains the server's signed
+prefix.  The full thinking surface is described in
+\S\ref{sec:thinking}.
+\end{sloppypar}
+
+\begin{sloppypar}
+Conversation turns are built through five builder methods.
+\sel{addUserMessage:} appends a plain-text user turn;
+\sel{addAssistantMessage:} appends a plain-text assistant turn
+(useful for conversation replay); \sel{addAssistantResponse:}
+appends a whole prior \cls{ClaudeMessage}, preserving its
+content-block shape (thinking, citations, tool use all survive);
+\sel{addToolResult:content:} and
+\sel{addToolResult:content:isError:} append a user turn
+containing a tool result paired to the matching tool-use id.
+\end{sloppypar}
+
+\subsection{Response Shape (ClaudeMessage)}
+
+\cls{ClaudeMessage} is the typed response every successful
+Messages call returns.  It holds seven instance variables ---
+\texttt{id}, \texttt{type}, \texttt{turn}, \texttt{usage},
+\texttt{stopDetails}, \texttt{executionContainer}, and
+\texttt{requestContext} --- and exposes the familiar API shape
+through forwarding accessors that delegate to the composite
+value objects.  The public-accessor surface:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{6cm}@{}}
+\toprule
+\textbf{Accessor} & \textbf{Returns} & \textbf{Description} \\
+\midrule
+\sel{id}           & String         & Unique message identifier (instVar) \\
+\sel{type}         & String         & Always \texttt{'message'} (instVar) \\
+\sel{role}         & Symbol         & \texttt{\#assistant} for responses; delegated to \texttt{turn} \\
+\sel{content}      & OrderedCollection of \cls{ClaudeContentBlock}
+                   & Text, tool use, thinking blocks; delegated to \texttt{turn} \\
+\sel{model}        & String         & Model ID used; delegated to \texttt{turn} \\
+\sel{stopReason}   & Symbol         & See stop reason values below; delegated to \texttt{stopDetails} \\
+\sel{stopSequence} & String or nil  & Matched stop sequence; delegated to \texttt{stopDetails} \\
+\sel{usage}        & \cls{ClaudeUsage} & Token counts (instVar) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The \texttt{stopReason} value is a Symbol the SDK normalizes
+from the wire string: \texttt{\#end\_turn}, \texttt{\#tool\_use},
+\texttt{\#max\_tokens}, \texttt{\#stop\_sequence},
+\texttt{\#pause\_turn}, and \texttt{\#refusal}.  See
+\S\ref{sec:stop-reasons} for per-value handling patterns.
+Alongside the accessors, four key methods cover the
+most-used response operations: \sel{asParam} converts the
+message back to request-param shape for multi-turn replay;
+\sel{accumulate:} builds the message incrementally from
+streaming events (see \S\ref{sec:streaming}); \sel{textContent}
+concatenates every \cls{ClaudeTextBlock} in \texttt{content}
+into a single String; and \sel{toolUseBlocks} selects the
+\cls{ClaudeToolUseBlock} entries for tool-dispatch code to
+iterate.
+
+The four composite value objects keep the response class
+narrow.  \cls{ClaudeTurn} groups the role-and-content pair,
+\cls{ClaudeStopDetails} holds the stop-reason breakdown,
+\cls{ClaudeRequestContext} carries request-level metadata, and
+\cls{ClaudeExecutionContainer} tracks the code-execution
+container state when a request used skills or code execution:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{5.5cm}@{}}
+\toprule
+\textbf{Class} & \textbf{Responsibility} & \textbf{Key Fields} \\
+\midrule
+\cls{ClaudeTurn}             & Role and content grouping   & \texttt{role}, \texttt{content}, \texttt{model} \\
+\cls{ClaudeStopDetails}      & Stop reason breakdown       & \texttt{stopReason}, \texttt{stopSequence}, \texttt{category}, \texttt{explanation} \\
+\cls{ClaudeRequestContext}   & Request-level metadata      & \texttt{requestId}, \texttt{outputFormat} \\
+\cls{ClaudeExecutionContainer} & Container execution context & \texttt{containerId}, \texttt{expiresAt}, \texttt{skills} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\cls{ClaudeUsage} is the fifth composite and tracks the token
+counts every response carries --- it is what cost-analysis and
+cache-effectiveness code reads after a call:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{5.5cm}@{}}
+\toprule
+\textbf{Variable} & \textbf{Type} & \textbf{Description} \\
+\midrule
+\texttt{inputTokens}              & Integer          & Tokens in request \\
+\texttt{outputTokens}             & Integer          & Tokens in response \\
+\texttt{cacheCreationInputTokens} & Integer          & Prompt cache creation \\
+\texttt{cacheReadInputTokens}     & Integer          & Prompt cache hits \\
+\texttt{inferenceGeo}             & String or nil    & Inference region hint echoed by the server \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Content Block Types}
+\label{sec:content-blocks}
+
+A response's \texttt{content} is a collection of
+\cls{ClaudeContentBlock} instances, not a single string ---
+Claude may return interleaved text, tool use, thinking, and
+server-tool-result blocks in one message.  Each block is a
+subclass with its own instance variables and its own
+\sel{asJson} / \sel{fromJson:} pair.
+\texttt{ClaudeContentBlock class>>fromJson:} dispatches on the
+discriminator \texttt{type} field via a registry Dictionary
+mapping type strings to subclasses; unknown types fall back to
+a raw-JSON instance of the abstract class so forward-compatible
+payloads never lose data.  Feature sections cross-reference this
+taxonomy: Vision~(\S\ref{sec:vision}), PDF~(\S\ref{sec:pdf}),
+Citations~(\S\ref{sec:citations}), Search
+Results~(\S\ref{sec:search-results}),
+Thinking~(\S\ref{sec:thinking}), and Tool
+Use~(\S\ref{sec:tool-use}).  The primary hierarchy --- blocks
+callers can both send and receive --- is:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{6.2cm}@{}}
+\toprule
+\textbf{Class} & \textbf{Wire Type} & \textbf{Key Fields} \\
+\midrule
+\cls{ClaudeContentBlock}            & (abstract)        & \texttt{type}, \texttt{rawJson} \\
+\cls{ClaudeTextBlock}               & \texttt{text}     & \texttt{text}, \texttt{citations}, \texttt{cacheControl} \\
+\cls{ClaudeToolUseBlock}            & \texttt{tool\_use} & \texttt{id}, \texttt{name}, \texttt{input} \\
+\cls{ClaudeToolResultBlock}         & \texttt{tool\_result} & \texttt{toolUseId}, \texttt{content}, \texttt{isError}, \texttt{cacheControl} \\
+\cls{ClaudeThinkingBlock}           & \texttt{thinking} & \texttt{thinking}, \texttt{signature} \\
+\cls{ClaudeRedactedThinkingBlock}   & \texttt{redacted\_thinking} & \texttt{data} \\
+\cls{ClaudeImageBlock}              & \texttt{image}    & \texttt{source} \\
+\cls{ClaudeDocumentBlock}           & \texttt{document} & \texttt{source} (via \cls{ClaudeDocumentSource} hierarchy), \texttt{title}, \texttt{citations} \\
+\cls{ClaudeContainerUploadBlock}    & \texttt{container\_upload} & \texttt{fileId} (derived from \texttt{rawJson}) \\
+\cls{ClaudeCompactionBlock}         & \texttt{compaction} & \texttt{content} (server-emitted summary) \\
+\cls{ClaudeMCPToolUseBlock}         & \texttt{mcp\_tool\_use} & \texttt{id}, \texttt{name}, \texttt{serverName}, \texttt{input} \\
+\cls{ClaudeMCPToolResultBlock}      & \texttt{mcp\_tool\_result} & \texttt{toolUseId}, \texttt{content}, \texttt{isError} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\cls{ClaudeDocumentBlock} sends documents to the API.  The wire
+format uses type \texttt{"document"} with a \texttt{source}
+object whose structure varies by source type; the
+\cls{ClaudeDocumentSource} hierarchy covers five shapes:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{5cm}@{}}
+\toprule
+\textbf{Class} & \textbf{Source Type} & \textbf{Key Fields} \\
+\midrule
+\cls{ClaudeBase64DocumentSource}  & \texttt{base64}  & \texttt{data}, \texttt{mediaType} \\
+\cls{ClaudeTextDocumentSource}    & \texttt{text}    & \texttt{data} \\
+\cls{ClaudeContentDocumentSource} & \texttt{content} & \texttt{content} (array of blocks) \\
+\cls{ClaudeURLDocumentSource}     & \texttt{url}     & \texttt{url} \\
+\cls{ClaudeFileDocumentSource}    & \texttt{file}    & \texttt{fileId} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{sloppypar}
+Four class-side factories on \cls{ClaudeDocumentBlock} ---
+\sel{fromBase64:}, \sel{fromFileId:}, \sel{fromText:},
+\sel{fromURL:} --- pick the right source subclass so callers
+rarely touch \cls{ClaudeDocumentSource} directly; on the
+response side, \texttt{ClaudeDocumentSource class>>fromJson:}
+dispatches on the \texttt{type} field and returns the matching
+concrete source.  \cls{ClaudeTextBlock}'s \texttt{citations}
+collection uses the \cls{ClaudeCitation} shape described in
+\S\ref{sec:citations}.
+\end{sloppypar}
+
+Five server-managed blocks appear only in responses and are
+read-only from a client perspective.  The SDK deserializes them
+so conversations round-trip, but application code does not
+build them:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lp{9cm}@{}}
+\toprule
+\textbf{Class} & \textbf{Description} \\
+\midrule
+\cls{ClaudeServerToolUseBlock}        & Server-managed tool invocation (wire type \texttt{'server\_tool\_use'}) \\
+\cls{ClaudeWebSearchResultBlock}      & Web search result (wire type \texttt{'web\_search\_tool\_result'}) \\
+\cls{ClaudeWebFetchResultBlock}       & Web fetch result (wire type \texttt{'web\_fetch\_tool\_result'}) \\
+\cls{ClaudeCodeExecutionResultBlock}  & Code execution result (wire type \texttt{'code\_execution\_tool\_result'}) \\
+\cls{ClaudeBashResultBlock}           & Server Bash result (wire type \texttt{'bash\_code\_execution\_tool\_result'}); fields \texttt{toolUseId}, \texttt{returnCode}, \texttt{stdout}, \texttt{stderr} \\
+\cls{ClaudeTextEditorResultBlock}     & Server text-editor result (wire type \texttt{'text\_editor\_code\_execution\_tool\_result'}); fields \texttt{toolUseId}, \texttt{rawJson} (content sub-dict shape varies by editor command: \texttt{view} / \texttt{create} / \texttt{str\_replace}) \\
+\cls{ClaudeToolSearchResultBlock}     & Tool-discovery result (wire type \texttt{'tool\_search\_tool\_result'}); fields \texttt{toolUseId}, \texttt{toolReferences} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Each server-result block stores its raw JSON payload so fields
+the server adds in the future survive the round trip.
+
+\subsection{Per-Request Options}
+
+The durable request controls --- metadata, cache control,
+service tier, beta flags, MCP server list, container, and the
+streaming mode bit --- live on \cls{ClaudeRequestOptions} and
+are set through the forwarded setters on
+\cls{ClaudeMessageRequest} (see the Request Parameters tables
+above).  Those options travel with the request on the wire; the
+SDK never treats them as ad-hoc closures.
+
+A per-call override that doesn't belong on the wire --- a
+timeout bump for one particular long-running request, a debug
+log block scoped to one call --- is a property of the client,
+not of the request.  The preferred idiom is a dedicated
+\cls{ClaudeClient} configured with the override, used for the
+one call and then discarded.  Clients are cheap and stateless
+apart from their retry counter, so spinning up a second client
+with a different timeout is the safe way to scope the change
+--- a shared client never ends up stuck in the overridden state
+if the call raises:
+
+\begin{lstlisting}[language={}]
+"Dedicated client with a tighter timeout for one slow call."
+tightClient := ClaudeClient
+    apiKey: client apiKey
+    baseUrl: client baseUrl
+    timeout: 30.
+response := tightClient sendMessage: request.
+\end{lstlisting}
+
+The same pattern is the right shape for a parallel fan-out that
+wants a per-arm timeout: build one \cls{ClaudeClient} per arm
+with the timeout baked in, let each arm own its client, and the
+shared default client is never mutated.
+
+When building a second client is genuinely inconvenient ---
+deep inside a helper that receives the client as an argument,
+say --- mutate the setter inside an \sel{ensure:} block so the
+original value is restored even if the call raises:
+
+\begin{lstlisting}[language={}]
+"Ad-hoc override on the shared client, restored on every exit path."
+| originalTimeout |
+originalTimeout := client timeout.
+client timeout: 30.
+[ response := client sendMessage: request ]
+    ensure: [ client timeout: originalTimeout ].
+\end{lstlisting}
+
+For the canonical first-contact example see
+\S\ref{sec:overview}; for the tokens-only counterpart see
+\S\ref{sec:count-tokens}; for the exception hierarchy every
+call can raise see \S\ref{sec:errors}; for extended thinking
+and tool use that ride on a Messages request see
+\S\ref{sec:thinking} and \S\ref{sec:tool-use}; for streaming
+see \S\ref{sec:streaming}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/messages}.\quad
+Python SDK peer:
+\url{https://docs.anthropic.com/en/api/messages}.}}
+
+\section{Messages Examples}
+\label{sec:messages-examples}
+
+\begin{sloppypar}
+This section is the pattern catalog that accompanies
+\S\ref{sec:messages} Messages API.  Where \S\ref{sec:messages}
+describes the wire surface and its Pharo bindings,
+\S\ref{sec:messages-examples} collects the runnable
+conversation shapes a reader may reach for: multi-turn
+conversations, conversation replay, and tool-result
+round-tripping.  Every pattern is an ordinary
+\cls{ClaudeMessageRequest} built through the five builder
+selectors (\sel{addUserMessage:}, \sel{addAssistantMessage:},
+\sel{addAssistantResponse:}, \sel{addToolResult:content:},
+\sel{addToolResult:content:isError:}); the SDK's job is to
+serialize that request and return a typed
+\cls{ClaudeMessage}.
+\end{sloppypar}
+
+The runnable below is a multi-turn conversation against
+\cls{ClaudeMockServer}, which makes the pattern testable in the
+eval server without a live API key or network.  The first turn
+is a user question; the mock returns an assistant answer; the
+example appends that full response to the request via
+\sel{addAssistantResponse:}, adds a follow-up user turn, and
+sends the request a second time.  The accumulated messages
+collection after both round-trips contains four turns (user,
+assistant, user, assistant), which is the predicate the example
+evaluates to:
+
+\begin{lstlisting}[language={}]
+| server client request response |
+"Mock the same canned response for both POSTs; the example only checks turn bookkeeping."
+server := ClaudeMockServer startOn: 0.
+[ server
+    respondTo: '/v1/messages'
+    with: '{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"2 + 2 is 4."}],"model":"claude-sonnet-4-5","stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":12,"output_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}'.
+  client := ClaudeClient
+    apiKey: 'test-key'
+    baseUrl: 'http://localhost:' , server port printString
+    timeout: 5.
+  "Turn 1: build the request and send the first user question."
+  request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet45;
+    maxTokens: 256;
+    addUserMessage: 'What is 2 + 2?';
+    yourself.
+  response := client sendMessage: request.
+  "Append the full assistant response; addAssistantResponse: preserves every content block."
+  request addAssistantResponse: response.
+  "Turn 2: add a follow-up user question and reuse the client."
+  request addUserMessage: 'And what is that times 3?'.
+  response := client sendMessage: request.
+  "The request now has four turns: user, assistant, user, assistant."
+  ^ request messages size ]
+    ensure: [ server stop ]
+"=> 4"
+\end{lstlisting}
+
+\sel{addAssistantResponse:} takes a whole \cls{ClaudeMessage}
+and appends it as an assistant turn, calling \sel{asParam} on
+the message to produce the request-side shape.  Each
+\cls{ClaudeContentBlock} subclass answers its own \sel{asParam},
+so text, thinking, citations, and redacted-thinking blocks all
+survive the round trip correctly --- preserving redacted
+thinking is critical when the server's signed prefix would
+otherwise be lost.  \sel{addAssistantMessage:} is the
+plain-String variant: when replaying a conversation from a
+transcript, the reader often has the assistant text as a String
+and not as a \cls{ClaudeMessage}, and this selector wraps it
+back into a turn.  Tool-use loops use
+\sel{addToolResult:content:} (or the \texttt{isError:} variant
+to mark a failed tool call) to pair a result with its
+tool-use id.
+
+Further patterns --- prefill with an assistant turn, vision
+with an image content block, JSON-schema output, and full
+tool-use loops --- live with the feature sections they
+exercise: \S\ref{sec:thinking} for extended thinking,
+\S\ref{sec:vision} for vision, \S\ref{sec:citations} for
+citations, \S\ref{sec:tool-use} for client-side tool use,
+\S\ref{sec:server-tools} for server-executed tools,
+\S\ref{sec:structured-outputs} for JSON schema, and
+\S\ref{sec:errors} for the error-handling shapes that wrap
+every call.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/messages-examples}.}}
+
+\section{Count Tokens}
+\label{sec:count-tokens}
+
+Counting tokens before you send a message lets the caller quote
+cost up front and gate on context-window headroom without paying
+for a round-trip that would have exceeded the budget.  The
+count\_tokens endpoint accepts the same request shape as
+\texttt{sendMessage:} --- the same model, messages, system prompt,
+and tools --- so the count you receive is the same count the
+billing path would meter a moment later.  Applications use this
+for pre-flight pricing (``this conversation will cost N tokens''),
+UX warnings when a long turn is approaching the model's input
+cap, and batch-job gating where you would rather skip a request
+than overrun a quota.
+
+\begin{sloppypar}
+\texttt{ClaudeClient>>countTokens:} sends \texttt{POST
+/v1/messages/count\_tokens} and returns a
+\texttt{ClaudeMessageTokensCount}, a value object carrying one
+field: \texttt{inputTokens} (Integer) --- the token count for the
+given request parameters.  The response object has no output-token
+or cached-token breakdown; that information only exists once the
+model has actually generated a response.
+\end{sloppypar}
+
+The example below builds a request the same way
+\texttt{sendMessage:} takes one, hands it to \texttt{countTokens:},
+and reads the count off the result.  It is an end-to-end pre-flight
+check: if \texttt{count inputTokens} exceeds the caller's budget,
+skip the send entirely; otherwise hand the same \texttt{params}
+object to \texttt{sendMessage:}.
+
+\begin{lstlisting}[language={},title={Count tokens}]
+| params count |
+"Build a request the same way sendMessage: would."
+params := ClaudeMessageRequest new
+    model: ClaudeModel opus47;
+    maxTokens: 1024;
+    addUserMessage: 'How many tokens is this?';
+    yourself.
+
+"Send the count-tokens request; surface any API error directly."
+[ count := client countTokens: params ]
+  on: ClaudeApiError do: [ :e | ^ e signal ].
+
+"count is a ClaudeMessageTokensCount; read the single field."
+count inputTokens  "=> 14"
+\end{lstlisting}
+
+For the sibling endpoint that actually consumes the counted tokens
+see \S\ref{sec:messages}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/messages-count-tokens}.\quad
+Python SDK peer:
+\url{https://github.com/anthropics/anthropic-sdk-python\#token-counting}.}}
+
+\section{Models API --- List Models}
+\label{sec:models-list}
+
+The Models API tells an application what Claude variants the
+account can actually call, with their capability limits --- useful
+for model discovery in a UI, for capability gating (``skip this
+model if \texttt{maxInputTokens} is below the prompt I need to
+send''), and for spotting new aliases when Anthropic publishes a
+refreshed family.  \texttt{ClaudeClient>>listModels} sends
+\texttt{GET /v1/models} and returns an \texttt{OrderedCollection}
+of \texttt{ClaudeModelInfo}; each entry carries the model ID,
+display name, token limits, and creation timestamp.
+
+The example below lists every available model and prints its
+display name alongside its ID --- the shape of a discovery UI or a
+capability audit.  \texttt{listModels} is synchronous; a
+paginated variant, \texttt{listModels:after:}, returns a
+\texttt{Dictionary} with \texttt{data}, \texttt{has\_more},
+\texttt{first\_id}, and \texttt{last\_id} when cursor control
+matters.
+
+\begin{lstlisting}[language={},title={List available models}]
+| models |
+"Fetch every model the account can call; surface API errors directly."
+[ models := client listModels ]
+  on: ClaudeApiError do: [ :e | ^ e signal ].
+
+"Walk the collection; each entry is a ClaudeModelInfo."
+models do: [ :info |
+    Transcript show: info displayName, ' (', info id, ')'; cr ].
+\end{lstlisting}
+
+For code that wants to name a model at a call site without
+hard-coding a string, \texttt{ClaudeModel} provides class-side
+factory methods returning the model ID strings.  Applications may
+also pass any string the API accepts; the constants are
+conveniences that document which model family a call targets.  The
+factories and the strings they return:
+
+\begin{lstlisting}[language={},title={Model constants}]
+ClaudeModel haiku35     "=> 'claude-3-haiku-20240307'"
+ClaudeModel haiku45     "=> 'claude-haiku-4-5-20251001'"
+ClaudeModel sonnet45    "=> 'claude-sonnet-4-5-20250929'"
+ClaudeModel sonnet45v   "=> 'claude-sonnet-4-5-20250929'"
+ClaudeModel sonnet46    "=> 'claude-sonnet-4-6'"
+ClaudeModel opus4       "=> 'claude-opus-4-20250514'"
+ClaudeModel opus4v      "=> 'claude-opus-4-20250514'"
+ClaudeModel opus46      "=> 'claude-opus-4-6'"
+ClaudeModel opus46v     "=> 'claude-opus-4-6'"
+ClaudeModel opus47      "=> 'claude-opus-4-7'"
+ClaudeModel opus47v     "=> 'claude-opus-4-7'"
+\end{lstlisting}
+
+The \texttt{v} suffix historically distinguished dated model IDs
+from floating aliases.  In the current table, non-\texttt{v} and
+\texttt{v} selectors return the same string for the newer models
+(\texttt{opus46}, \texttt{opus47}, \texttt{sonnet46}); the suffix
+exists for future-proofing when Anthropic publishes a dated
+variant.  For older models (\texttt{opus4}, \texttt{sonnet45}),
+both forms already resolve to a dated string --- there is no
+functional floating alias.
+
+For the single-model sibling endpoint see \S\ref{sec:models-get};
+for the scope of the Models API surface in this SDK see
+\S\ref{sec:scope}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/models-list}.\quad
+Python SDK peer: \url{https://github.com/anthropics/anthropic-sdk-python\#list-models}.}}
+
+\section{Models API --- Get a Model}
+\label{sec:models-get}
+
+When an application already knows a model ID and needs only that
+model's capability details --- maximum input tokens, maximum output
+tokens, the human-readable display name --- fetching the single
+record is cheaper than listing the catalog and filtering.
+\texttt{ClaudeClient>>getModel:} sends \texttt{GET
+/v1/models/\{id\}} and returns a single \texttt{ClaudeModelInfo};
+an unknown ID raises \texttt{ClaudeNotFoundError} (404), which a
+capability-gating path typically treats as ``model unavailable''
+rather than a hard failure.
+
+The example below retrieves one model by ID, handles the
+unknown-ID case with the typed 404, and then reads the
+capability fields the application cares about.  The
+\texttt{on: ClaudeNotFoundError} idiom is the right shape for a
+capability check: other errors (network, 5xx, auth) propagate.
+
+\begin{lstlisting}[language={},title={Get specific model info}]
+| info |
+"Retrieve capability details for a specific model;
+ catch 404 as 'model unavailable' and let other errors propagate."
+[ info := client getModel: 'claude-sonnet-4-5' ]
+  on: ClaudeNotFoundError do: [ :e |
+    Transcript show: 'Unknown model'; cr. ^ nil ].
+
+"Read the capability fields off the ClaudeModelInfo response."
+info maxInputTokens  "=> 200000"
+info maxTokens       "=> 8192"
+\end{lstlisting}
+
+\texttt{ClaudeModelInfo} is the response type for both
+\texttt{listModels} and \texttt{getModel:}.  It carries six fields:
+
+\begin{center}
+\begin{tabular}{@{}llp{5.5cm}@{}}
+\toprule
+\textbf{Variable} & \textbf{Type} & \textbf{Description} \\
+\midrule
+\texttt{id}              & String   & Model identifier \\
+\texttt{displayName}     & String   & Human-readable name \\
+\texttt{maxInputTokens}  & Integer  & Maximum input context length \\
+\texttt{maxTokens}       & Integer  & Maximum output tokens \\
+\texttt{type}            & String   & Always \texttt{'model'} \\
+\texttt{createdAt}       & String   & ISO-8601 creation timestamp \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+For the list endpoint that returns an
+\texttt{OrderedCollection} of these records see
+\S\ref{sec:models-list}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/models}.\quad
+Python SDK peer: \url{https://github.com/anthropics/anthropic-sdk-python\#retrieve-model}.}}
+
+\section{Handling Stop Reasons}
+\label{sec:stop-reasons}
+
+Every Messages response carries a \texttt{stopReason} --- a Symbol
+that tells the caller why Claude stopped generating.  Applications
+dispatch on it to continue a tool-use loop, resume a paused turn,
+surface a natural completion to the user, or fall through to
+telemetry when the model ran into a limit.  The stop reason is the
+first thing an agent reads off a response; it is how the agent
+decides what to do next.
+
+\begin{sloppypar}
+The wire protocol actually uses two value domains and the SDK
+preserves them.  The top-level \texttt{stop\_reason} field from the
+response is parsed by \texttt{ClaudeStopDetails} class>>\texttt{fromJson:}
+and surfaced as \texttt{ClaudeMessage>>stopReason}, a Symbol.  The
+separate \texttt{stop\_details.type} sub-object (currently used for
+the \texttt{'refusal'} category with its own \texttt{category} and
+\texttt{explanation} fields) is accessed through
+\texttt{ClaudeMessage>>stopDetails} and the \texttt{category} /
+\texttt{explanation} accessors --- it does \emph{not} appear as a
+\texttt{stopReason} value.  The table below covers the five
+Symbol values the \texttt{stop\_reason} field actually emits:
+\end{sloppypar}
+
+\begin{center}
+\begin{tabular}{@{}lp{9.5cm}@{}}
+\toprule
+\textbf{stopReason} & \textbf{Meaning} \\
+\midrule
+\texttt{\#end\_turn}     & Natural completion \\
+\texttt{\#max\_tokens}   & Hit \texttt{maxTokens} cap or model max \\
+\texttt{\#stop\_sequence} & Hit a \texttt{stopSequences} entry \\
+\texttt{\#tool\_use}     & Model invoked one or more tools \\
+\texttt{\#pause\_turn}   & Long-running turn paused; resume with the same messages \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Refusals arrive as \texttt{stopReason = \#end\_turn} plus a
+populated \texttt{stopDetails} sub-object whose \texttt{category}
+names the safety category (for example,
+\texttt{'violence'}) and whose \texttt{explanation} carries a
+short rationale.  Code that needs to distinguish a refusal from an
+ordinary natural completion reads \texttt{response stopDetails
+category} after checking \texttt{stopReason = \#end\_turn} ---
+both paths use the same \texttt{\#end\_turn} stop reason on the
+wire.
+
+Applications that need to branch on \texttt{stopReason} match on
+the Symbol directly --- there is no wrapper class or visitor
+pattern.  A typical first-contact dispatch covers the three
+branches an agent loop actually cares about: complete response,
+tool-use continuation, and paused-turn resumption.  The runnable
+below starts with a nil-guard: \texttt{ClaudeMessage>>stopReason}
+returns nil when \texttt{stopDetails} has not been populated (an
+in-flight streaming response, a manually constructed message),
+and silent nil-dispatch is not a shape any caller wants:
+
+\begin{lstlisting}[language={},title={Dispatch on stopReason}]
+| response reason |
+response := client sendMessage: request.
+reason := response stopReason.
+
+"Nil-guard: an incomplete response has no stopReason yet."
+reason ifNil: [ ^ nil ].
+
+"Natural completion: hand the text back to the caller."
+reason = #end_turn ifTrue: [ ^ response textContent ].
+
+"Tool use: the model invoked tools; run them and loop."
+reason = #tool_use ifTrue: [ ^ self handleToolUse: response ].
+
+"Paused turn: long-running work suspended; resume with same messages."
+reason = #pause_turn ifTrue: [ ^ self resumeWithSameMessages ].
+
+"Fall-through: #max_tokens or #stop_sequence --- telemetry / surface."
+^ self recordUnexpectedStop: reason
+\end{lstlisting}
+
+For the refusal case --- and for other non-2xx failures that
+never produce a response in the first place --- see
+\S\ref{sec:errors}; for the \texttt{\#tool\_use} branch and how a
+tool-use loop continues see \S\ref{sec:tool-use}; for the
+\texttt{\#pause\_turn} branch and the Extended Thinking flow that
+drives it see \S\ref{sec:thinking}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/handling-stop-reasons}.}}
+
+\section{Errors}
+\label{sec:errors}
+
+The Messaging SDK turns every non-2xx HTTP response from the
+Messages API into a typed Smalltalk exception.  Rather than carrying
+a status-code field on a single error class, the SDK dispatches at
+the response boundary: a 401 becomes a \texttt{ClaudeAuthError},
+a 429 becomes a \texttt{ClaudeRateLimitError}, a 529 becomes a
+\texttt{ClaudeOverloadedError}.  Callers write
+\texttt{[ ... ] on: ClaudeAuthError do: [:e | ...]} and let
+everything else propagate --- the idiomatic Smalltalk analog of the
+Python SDK's \texttt{APIStatusError} hierarchy.
+
+\texttt{ClaudeApiError} is the abstract base, a subclass of
+\texttt{Error}.  Ten concrete subclasses cover the status codes
+the API actually returns:
+
+\begin{center}
+\begin{tabular}{@{}l l c p{5.6cm}@{}}
+\toprule
+\textbf{Class} & \textbf{HTTP Status} & \textbf{Retryable} & \textbf{When} \\
+\midrule
+\texttt{ClaudeApiError}            & (abstract)       & ---  & Base class for all API errors \\
+\texttt{ClaudeInvalidRequestError} & 400              & no   & Malformed or invalid request \\
+\texttt{ClaudeAuthError}           & 401              & no   & Invalid API key \\
+\texttt{ClaudeBillingError}        & 402              & no   & Billing issue \\
+\texttt{ClaudePermissionError}     & 403              & no   & Insufficient permissions \\
+\texttt{ClaudeNotFoundError}       & 404              & no   & Unknown model or endpoint \\
+\texttt{ClaudeTimeoutError}        & 408 / 504        & yes  & Request or gateway timeout \\
+\texttt{ClaudeRateLimitError}      & 429              & yes  & Rate limit exceeded; honors \texttt{Retry-After} \\
+\texttt{ClaudeServerError}         & 500              & yes  & Internal server error \\
+\texttt{ClaudeOverloadedError}     & 529              & yes  & API overloaded (Anthropic-specific) \\
+\texttt{ClaudeNetworkError}        & 599 (synthetic)  & no   & Connection refused, TLS handshake, DNS --- a refused connection stays refused \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Every instance carries the status code, the Anthropic error message,
+the request ID from the \texttt{request-id} response header, the raw
+JSON body for logging, and an optional \texttt{retryAfter} parsed
+from the \texttt{retry-after} header on 429 responses.  The
+class-side factory \texttt{fromStatusCode:json:requestId:} is what
+\texttt{ClaudeClient} calls internally; in application code you
+almost never construct these directly --- you catch them.
+
+The example below demonstrates the dispatch end-to-end.  It calls
+the factory with a 401 status code, signals the resulting
+exception, and shows a handler that catches the specific subclass
+(\texttt{ClaudeAuthError}) the factory routed to.  The same shape
+is what \texttt{ClaudeClient} produces on a real auth failure, so
+the application code that handles it looks identical:
+
+\begin{lstlisting}[language={}]
+| caught |
+caught := [
+    "Build the error and raise it (the SDK does this internally for any non-2xx response)."
+    (ClaudeApiError
+        fromStatusCode: 401
+        json: '{"error":{"message":"bad key"}}'
+        requestId: 'req_1') signal ]
+    on: ClaudeAuthError
+    do: [ :e | e class name ].  "Handler catches the specific subclass."
+caught
+"=> #ClaudeAuthError"
+\end{lstlisting}
+
+Streaming responses get the same exception hierarchy.  The
+Messages API uses Server-Sent Events for incremental token
+delivery (see \S\ref{sec:streaming}); an in-flight stream can
+deliver an SSE \texttt{error} event after the response has started
+--- a server-side overload, a model timeout, a 529 spike.  The SDK
+routes those events through \texttt{fromSseErrorData:}, populating
+the synthetic status code from the Anthropic \texttt{error.type}
+string so \texttt{isRetryable} and \texttt{printOn:} behave
+identically whether the error arrived on the status line or in a
+streaming payload.  One \texttt{on: ClaudeApiError do: [...]}
+handler covers both paths.
+
+The SDK retries the retryable failures (the \emph{Retryable}
+column above) automatically --- five retries by default, with
+exponential backoff from 0.5\,s to 8\,s and \textpm 25\% jitter.
+When the response carries a \texttt{Retry-After-Ms} or
+\texttt{Retry-After} header, the SDK uses the header value instead
+of the computed delay, clamped to 30\,s to defend against
+pathological values.  Tests that exercise the non-retry path must
+explicitly set \texttt{maxRetries: 0} or they will wait out the
+full backoff sequence; calls from the UI thread must be wrapped in
+a forked Process because the backoff delay blocks the current
+process.
+
+Two divergences from the Python SDK are worth knowing.  HTTP 529
+is Anthropic-specific and not IANA-assigned --- the SDK treats it
+as a retryable 5xx.  HTTP 599 is synthetic; the Python SDK raises
+\texttt{APIConnectionError} without a status code, while the Pharo
+SDK keeps everything inside the \texttt{ClaudeApiError} hierarchy
+so a single \texttt{on: ClaudeApiError do: [...]} catches both
+wire-protocol errors and connection errors uniformly.
+
+For the rate-limit monitoring headers surfaced on
+\texttt{ClaudeRateLimitError} see \S\ref{sec:rate-limits}; for
+how mid-stream SSE errors are routed see \S\ref{sec:streaming}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/errors}.\quad
+Python SDK peer:
+\url{https://github.com/anthropics/anthropic-sdk-python\#handling-errors}.}}
+
+\section{API Versions}
+\label{sec:api-versions}
+
+Every request to the Messages API carries an \texttt{anthropic-version}
+header that pins the wire format.  Anthropic guarantees that requests
+sent with a given version keep the same request and response shape
+indefinitely, so a client that pins a version keeps working across
+Anthropic's platform changes until it opts into a newer one.  The
+baseline is \texttt{2023-06-01}, which is what every first-party SDK
+ships with; new versions land when Anthropic changes response shapes
+or introduces incompatible defaults.
+
+In Pharo the version lives on \texttt{ClaudeClient}'s
+\texttt{apiVersion} slot, initialized to \texttt{'2023-06-01'} on
+construction and sent as the \texttt{anthropic-version} header by
+every HTTP-client factory (\texttt{newHttpClient},
+\texttt{newFileHttpClient}, \texttt{newSkillHttpClient}).  Override it
+with \texttt{apiVersion:} on a per-client basis when you need to opt
+into a new wire version during migration.
+
+This section is reference material; no runnable example applies.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/versioning}.}}
+
+\section{Beta Headers}
+\label{sec:beta-headers}
+
+Some Messages API features sit behind an \texttt{anthropic-beta}
+header that gates access to not-yet-stable surface: new input shapes
+(PDFs, extended-output models), new endpoints (Files API, Skills API,
+MCP client), or experimental response semantics.  Each beta is a
+string identifier like \texttt{pdfs-2024-09-25} or
+\texttt{files-api-2025-04-14}; callers can opt into several at once
+by sending a comma-joined header, and Anthropic lists the active
+identifiers on its beta-headers documentation page.
+
+Pharo handles beta headers two ways, depending on whether the beta
+is an SDK implementation detail or an application-level choice.
+\texttt{ClaudeClient} owns the automatic path: \texttt{newFileHttpClient}
+sends the Files API beta on every Files request and
+\texttt{newSkillHttpClient} sends the Skills beta on every Skills
+request, so Files and Skills callers never touch beta headers
+themselves.  For per-request betas --- the MCP client, PDF support,
+extended-output models --- callers set \texttt{betas:} on
+\texttt{ClaudeRequestOptions} (directly, or via
+\texttt{ClaudeMessageRequest} which delegates).  At send time,
+\texttt{newHttpClientFor:} reads the collection off the request
+options, joins it with commas, and emits it as the
+\texttt{anthropic-beta} header.
+
+\begin{sloppypar}
+The SDK ships a typed catalog of the known beta identifiers as
+\texttt{ClaudeBetaHeader}, a class intended for class-side use.
+Class-side messages return the wire String:
+\texttt{ClaudeBetaHeader pdfs} answers
+\texttt{'pdfs-2024-09-25'},
+\texttt{ClaudeBetaHeader structuredOutputs} answers
+\texttt{'structured-outputs-2025-11-13'}, and so on.  Typos are
+surfaced when the send is evaluated (as an unknown selector /
+\texttt{doesNotUnderstand:}) instead of landing only as a server
+400, and \texttt{ClaudeBetaHeader allKnown} returns
+the full list as an \texttt{OrderedCollection} for docs generation,
+validation, and test parity.  The catalog is pure discovery:
+\texttt{ClaudeRequestOptions>>betas:} still accepts an arbitrary
+collection of Strings, so unknown-to-the-SDK identifiers remain
+usable without waiting on a catalog update.
+\end{sloppypar}
+
+The example below demonstrates the opt-in path in both spellings.
+It builds a request options object, sets two beta identifiers, and
+asks it for the header value that \texttt{ClaudeClient} would emit
+on the wire --- the same value that \texttt{newHttpClientFor:}
+would place on the \texttt{anthropic-beta} header.  The first body
+matches \texttt{ClaudeRequestOptions}'s class-comment doctest
+byte-for-byte; the second shows the catalog-aware form and
+produces the identical wire value:
+
+\begin{lstlisting}[language={}]
+"Build an options object with two active betas and read back the wire value."
+ClaudeRequestOptions new
+    betas: #('pdfs-2024-09-25' 'output-128k-2025-02-19');
+    betaHeader
+"=> 'pdfs-2024-09-25,output-128k-2025-02-19'"
+\end{lstlisting}
+
+\begin{lstlisting}[language={}]
+"Same two betas via the typed catalog -- identical wire value."
+ClaudeRequestOptions new
+    betas: { ClaudeBetaHeader pdfs. ClaudeBetaHeader output128k };
+    betaHeader
+"=> 'pdfs-2024-09-25,output-128k-2025-02-19'"
+\end{lstlisting}
+
+To use this in an application, call \texttt{betas:} directly on the
+\texttt{ClaudeMessageRequest} before \texttt{sendMessage:} --- the
+request owns a \texttt{ClaudeRequestOptions} instance from
+construction and the convenience setter writes through to it.  For
+the less common cases that \texttt{betas:} does not cover, mutate
+\texttt{request requestOptions} directly.  The Files and Skills APIs
+require no such wiring --- their beta headers are part of the
+endpoint's identity and the SDK adds them automatically via
+\texttt{ClaudeBetaHeader filesApi} and
+\texttt{ClaudeBetaHeader skills}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/beta-headers}.}}
+
+\section{Rate Limits}
+\label{sec:rate-limits}
+
+Anthropic enforces rate limits per API key on three axes: requests
+per minute (RPM), input tokens per minute (ITPM), and output tokens
+per minute (OTPM).  The limits scale with the account tier, and
+every response carries monitoring headers
+(\texttt{anthropic-ratelimit-requests-remaining},
+\texttt{anthropic-ratelimit-tokens-remaining}, and companions) that
+tell the caller how close they are to the next 429.  When a limit is
+hit, the API returns a 429 with a \texttt{retry-after} hint; the
+Pharo SDK surfaces this as \texttt{ClaudeRateLimitError}
+(\S\ref{sec:errors}) and honors the hint automatically on retry.
+
+For applications that make many concurrent requests on the same API
+key, reactive 429 handling is not enough --- the retry-after delay
+blocks the calling process, and several callers racing to retry can
+stampede the budget right back to zero.  The SDK ships
+\texttt{ClaudeRateLimiter}, a token-bucket limiter that coordinates
+request rates across every \texttt{ClaudeClient} sharing a key.  The
+bucket starts full (five tokens by default, one per permitted burst
+request), drains one token per call to \texttt{acquire}, and refills
+at \texttt{requestsPerMinute / 60} tokens per second.  When the
+bucket is empty, callers block in \texttt{acquire} until a token
+becomes available or the 30-second timeout fires.
+
+\begin{sloppypar}
+The example below demonstrates constructing a limiter at a chosen
+rate.  The body matches \texttt{ClaudeRateLimiter}'s class-comment
+doctest byte-for-byte --- the printed form is the limiter's own
+\texttt{printOn:}, which reports its configured RPM and burst size:
+\end{sloppypar}
+
+\begin{lstlisting}[language={}]
+"Build a limiter sized for 50 requests per minute and read its printed form."
+ClaudeRateLimiter new requestsPerMinute: 50
+"=> a ClaudeRateLimiter(50 rpm, 5 burst)"
+\end{lstlisting}
+
+To use the limiter with a client, attach it via \texttt{rateLimiter:}
+on \texttt{ClaudeClient}; \texttt{sendMessage:} then calls
+\texttt{acquire} before dispatching each HTTP request, blocking when
+the bucket runs dry.  The class-side factories
+\texttt{forKey:} and \texttt{forKey:model:} return a shared limiter
+keyed on an API key (and optionally the model name), so every client
+built against the same credentials automatically contends on the
+same bucket --- the default model-aware factory picks 20 RPM for
+Opus, 50 RPM for Haiku, and 40 RPM elsewhere.
+
+\begin{sloppypar}
+For reactive observation of the live limit state, every
+\texttt{sendMessage:} response carries a typed
+\texttt{ClaudeResponseMetadata} attached as
+\texttt{ClaudeMessage>>responseMetadata} (with a
+\texttt{rateLimits} convenience reader for shorter call chains).
+The metadata holds eleven nil-tolerant slots: \texttt{requestId}
+echoed from the \texttt{request-id} header, the three-axis
+\texttt{anthropic-ratelimit-*} counters
+(\texttt{rateLimitRequestsLimit},
+\texttt{rateLimitRequestsRemaining},
+\texttt{rateLimitRequestsReset},
+\texttt{rateLimitInputTokensLimit},
+\texttt{rateLimitInputTokensRemaining},
+\texttt{rateLimitInputTokensReset},
+\texttt{rateLimitOutputTokensLimit},
+\texttt{rateLimitOutputTokensRemaining},
+\texttt{rateLimitOutputTokensReset}), and the optional
+\texttt{retryAfter} hint that 429 responses set per RFC 7231 §7.1.3.
+The integer counters parse via \texttt{asInteger}; reset timestamps
+stay as the raw ISO-8601 String the server sends so callers can
+parse on demand without losing precision.  The
+\texttt{hasRateLimits} predicate answers \texttt{true} when any of
+the nine ratelimit slots is populated; \texttt{requestId} and
+\texttt{retryAfter} never count toward it.  The same metadata
+attaches to \texttt{ClaudeApiError} subclasses on the failure path
+so \texttt{ClaudeRateLimitError} handlers can read live counters and
+the reset timestamp to pick a smarter backoff than
+\texttt{Retry-After} alone.
+\end{sloppypar}
+
+\begin{lstlisting}[language={}]
+"Read the live ratelimit counters off a successful send."
+| client request response |
+client := ClaudeSDKExampleSupport resolveClient.
+request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 64;
+    addUserMessage: 'ping';
+    yourself.
+response := client sendMessage: request.
+{ response rateLimits rateLimitRequestsRemaining.
+  response rateLimits rateLimitRequestsReset.
+  response rateLimits hasRateLimits }
+"=> #(98 '2026-04-22T17:30:00Z' true)  (values vary per response)"
+\end{lstlisting}
+
+For the rate-limit exception that 429 responses produce see
+\S\ref{sec:errors}; for service-tier interactions with rate limits
+see \S\ref{sec:service-tiers}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/rate-limits}.}}
+
+\section{Service Tiers}
+\label{sec:service-tiers}
+
+Service tiers let the caller trade throughput against cost and
+latency for a given request.  The Messages API exposes two values
+on the \texttt{service\_tier} request-body field: \texttt{auto} (the
+default --- the scheduler picks the best tier available to the
+account, including priority when capacity permits) and
+\texttt{standard\_only} (force the standard tier even when priority
+capacity is available, typically for cost-predictability).
+Asynchronous batch processing is not a \texttt{service\_tier} value;
+it is reached via a separate endpoint (\S\ref{sec:batches}) whose
+requests are billed at the batch discount regardless of what the
+per-request \texttt{service\_tier} field would otherwise select.
+Anthropic returns the tier actually applied on the response so
+callers can observe which tier the scheduler chose.
+
+In Pharo the tier is set via \texttt{serviceTier:} on
+\texttt{ClaudeMessageRequest}, which delegates to the underlying
+\texttt{ClaudeRequestOptions}.  The setter takes the wire string
+directly --- pass either a raw String or one of the
+\texttt{ClaudeServiceTier} catalog constants
+(\texttt{ClaudeServiceTier auto},
+\texttt{ClaudeServiceTier standardOnly}) which return those exact
+strings.  The catalog is a discovery surface, not a typed enum:
+the setter still accepts arbitrary Strings so unknown values flow
+through to Anthropic if it ever extends the field.  Validation is
+deliberately left to the server because client-side enforcement
+would lock out forward-compat tiers.  The request serializer emits
+the field only when a value is set, so requests that leave the tier
+unset fall back to Anthropic's default (equivalent to
+\texttt{'auto'}).
+
+The example below demonstrates selecting the default tier
+explicitly on a message request and reading the configured value
+back.  It uses the \texttt{ClaudeMessageRequest} convenience setter,
+which writes through to the request options; the body matches
+\texttt{ClaudeMessagingRequestOptionsExample}'s canonical build
+shape:
+
+\begin{lstlisting}[language={}]
+"Build a request that asks the scheduler to pick the best tier."
+| request |
+request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 1024;
+    serviceTier: 'auto';  "Let the scheduler pick; 'standard_only' forces standard."
+    addUserMessage: 'What is the capital of France?';
+    yourself.
+request serviceTier
+"=> 'auto'"
+\end{lstlisting}
+
+The tier that Anthropic actually applied to a response is read off
+\texttt{ClaudeUsage>>serviceTier}.  The server echoes the chosen
+tier in the response body under \texttt{usage.service\_tier} and
+\texttt{ClaudeUsage class >> fromJson:} parses that field into the
+\texttt{serviceTier} slot; the value is nil when Anthropic does not
+echo the field (older endpoints, or count-tokens replies).  Note
+that the response-side vocabulary is distinct from the request-side
+\texttt{ClaudeServiceTier} catalog: the request says \emph{which
+scheduling policy to use} (\texttt{'auto'} or \texttt{'standard\_only'}
+today), while \texttt{usage.service\_tier} reports \emph{which
+backend tier was actually applied} (typically \texttt{'standard'},
+\texttt{'priority'}, or \texttt{'batch'}).  Treat the
+\texttt{usage.service\_tier} value as a raw String for now;
+\texttt{ClaudeServiceTier} does not enumerate response-side
+identifiers, only request-side policies.  The
+broader rate-limit telemetry that the live response carries lives
+on \texttt{ClaudeMessage>>responseMetadata} (see
+\S\ref{sec:rate-limits}), so callers reading the applied tier and
+the rate-limit counters drill into two adjacent objects on the same
+response rather than re-parsing headers themselves.
+
+\begin{lstlisting}[language={}]
+"Read the tier the scheduler applied to a response."
+| client request response |
+client := ClaudeSDKExampleSupport resolveClient.
+request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 64;
+    serviceTier: ClaudeServiceTier auto;
+    addUserMessage: 'ping';
+    yourself.
+response := client sendMessage: request.
+{ response usage serviceTier. ClaudeServiceTier allKnown asArray }
+"=> #('standard' #('auto' 'standard_only'))  (applied value varies)"
+\end{lstlisting}
+
+For the Batches API that owns asynchronous batch-tier processing
+see \S\ref{sec:batches}; for the rate-limit interactions the
+\texttt{auto} and \texttt{standard\_only} tiers share see
+\S\ref{sec:rate-limits}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/service-tiers}.}}
+
+\section{Client SDKs}
+\label{sec:client-sdks}
+
+Anthropic publishes first-party client SDKs in Python, TypeScript,
+Java, Ruby, C\#, PHP, and a CLI, and maintains a catalog of
+additional community and partner SDKs.  Each SDK wraps the same
+Messages API over HTTP and exposes the same response shapes; they
+differ in idiom, packaging, and what their host ecosystem lets them
+express.  The Pharo SDK this specification describes is a
+Punt Labs port into the Pharo Smalltalk ecosystem, not
+Anthropic-maintained; it ships in two layers, a Messaging layer
+(this document) and an Agent layer (separate specification).
+
+This section is reference material; no runnable example applies.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/client-sdks}.}}
+
+\section{Batches API}
+\label{sec:batches}
+
+The Batches API accepts up to 100\,000 Messages-API requests in a
+single job (256\,MB per batch) and runs them asynchronously against
+the \texttt{batch} service tier at a discounted per-token rate.
+Callers submit a batch, poll for completion, and then stream the
+per-request results as a single download once the job finishes.  The
+endpoint covers six operations: create, retrieve, retrieve results,
+list, cancel, and delete.  Applications that can tolerate minutes of
+latency in exchange for the batch-tier discount use this surface to
+run overnight evaluations, bulk classification jobs, or warehouse
+backfills against the same Messages API they use interactively.
+
+The Pharo SDK does not implement the Batches API today.  No
+\texttt{ClaudeBatch*} classes exist in any \texttt{Claude-Messaging-*}
+package, and \texttt{ClaudeClient} exposes no batch selectors.  The
+implementation plan when it lands mirrors the Files API shape: a
+typed request/response layer in \texttt{Claude-Messaging-Types},
+\texttt{ClaudeClient} selectors for the six operations, and a
+streaming reader for the results download so large batches do not
+materialize in full in VM memory.
+
+This section is reference material; no runnable example applies.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Not yet implemented}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/creating-message-batches}.}}
+
+\section{Files API}
+\label{sec:files}
+
+The Files API uploads a file once and lets later requests reference
+it by ID instead of inlining base64 content on every call --- you
+save tokens, you save bandwidth, and large PDFs or images stop
+bloating every request payload.  The Pharo surface covers six Files
+API operations via seven selectors on \texttt{ClaudeClient}
+(\texttt{uploadFile:} and \texttt{listFiles} each have a one-arg and
+a parameterized form), each mirroring one of Anthropic's
+\texttt{client.beta.files.*} endpoints in the Python SDK.  The
+endpoints all sit behind the \texttt{files-api-2025-04-14} beta
+header, which the SDK injects automatically; callers never set it.
+
+\begin{center}
+\small
+\begin{tabular}{@{}l l p{5.4cm}@{}}
+\toprule
+\textbf{Selector} & \textbf{HTTP} & \textbf{Returns} \\
+\midrule
+\texttt{uploadFile:} & POST \texttt{/v1/files} & \texttt{ClaudeFileMetadata}.  One-arg form infers filename and MIME type from the \texttt{FileReference}. \\
+\texttt{uploadFile:filename:mimeType:} & POST \texttt{/v1/files} & \texttt{ClaudeFileMetadata}.  Three-arg form to override either. \\
+\texttt{listFiles}, \texttt{listFiles:} & GET \texttt{/v1/files} & \texttt{ClaudeFilePage}.  Pass a \texttt{ClaudeFileListParams} for cursor pagination (\texttt{limit}, \texttt{afterId}, \texttt{beforeId}). \\
+\texttt{getFileMetadata:} & GET \texttt{/v1/files/\{id\}} & \texttt{ClaudeFileMetadata} \\
+\texttt{downloadFile:} & GET \texttt{/v1/files/\{id\}/content} & A \texttt{ByteArray}.  Only Claude-generated files are downloadable; user uploads report \texttt{downloadable\,=\,false}. \\
+\texttt{deleteFile:} & DELETE \texttt{/v1/files/\{id\}} & \texttt{ClaudeDeletedFile} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The four typed request and response classes carry the API's data
+shape: \texttt{ClaudeFileMetadata} (id, filename, mimeType,
+sizeBytes, createdAt, downloadable), \texttt{ClaudeFilePage} (data
+array, hasMore, firstId, lastId), \texttt{ClaudeFileListParams}
+(limit, afterId, beforeId), and \texttt{ClaudeDeletedFile} (id,
+deleted).
+
+The most common usage is upload-once-reference-many: you upload a
+PDF or image, get a file ID back, and then attach it to message
+content blocks via \texttt{ClaudeDocumentBlock fromFileId:} or the
+equivalent on \texttt{ClaudeImageBlock}.
+
+The example below demonstrates the read path against
+\texttt{ClaudeMockServer} so it runs in the eval server without
+an API key or network connection.  It registers two canned
+responses (the file inventory and a single file's metadata),
+points a \texttt{ClaudeClient} at the mock's local port, calls
+\texttt{listFiles} and \texttt{getFileMetadata:}, and extracts
+four fields from the typed response objects.  The same body
+lives in \texttt{ClaudeClient}'s class comment as the canonical
+doctest:
+
+\begin{lstlisting}[language={}]
+| server client meta page |
+"Spin up an in-image mock HTTP server so the example needs neither network nor API key."
+server := ClaudeMockServer startOn: 0.
+[ "Register the canned response for GET /v1/files (the inventory listing)."
+  server
+    respondTo: '/v1/files'
+    with: '{"data":[{"id":"file-abc","type":"file","filename":"notes.txt","mime_type":"text/plain","size_bytes":6,"created_at":"2026-04-21T00:00:00Z","downloadable":false}],"has_more":false,"first_id":"file-abc","last_id":"file-abc"}'.
+  "Register the canned response for GET /v1/files/file-abc (single-file metadata)."
+  server
+    respondTo: '/v1/files/file-abc'
+    with: '{"id":"file-abc","type":"file","filename":"notes.txt","mime_type":"text/plain","size_bytes":6,"created_at":"2026-04-21T00:00:00Z","downloadable":false}'.
+  "Build a ClaudeClient that talks to the mock instead of api.anthropic.com."
+  client := ClaudeClient
+    apiKey: 'test-key'
+    baseUrl: 'http://localhost:' , server port printString
+    timeout: 5.
+  "Exercise the two read selectors and pull four fields out of the typed responses."
+  page := client listFiles.
+  meta := client getFileMetadata: 'file-abc'.
+  ^ { page data size. page data first id. meta filename. meta sizeBytes } ]
+    ensure: [ server stop ]  "Always stop the mock, even on error."
+"=> #(1 'file-abc' 'notes.txt' 6)"
+\end{lstlisting}
+
+Real upload, download, and delete usage is mechanically the same
+shape --- swap the mock server for a production client
+(\texttt{ClaudeSDKExampleSupport resolveClient} pulls the API key from
+the OS keyring or \texttt{ANTHROPIC\_API\_KEY} and points at
+\texttt{api.anthropic.com}) and swap the verbs.
+\texttt{client uploadFile: aFileReference} returns a metadata
+object whose \texttt{id} is the file ID;
+\texttt{client downloadFile: aFileId} returns a raw
+\texttt{ByteArray}; \texttt{client deleteFile: aFileId} returns a
+\texttt{ClaudeDeletedFile} whose \texttt{deleted} field reflects
+success.
+
+Two implementation details are worth knowing.  Uploads stream from
+disk in 64\,KB chunks via
+\texttt{ClaudeStreamingMultiPartEntity}, so VM memory usage is
+bounded by the chunk size plus framing rather than by the file
+size --- gigabyte uploads are safe.  Downloads follow the server's
+\texttt{downloadable} flag: only Claude-generated files (tool
+outputs, skill artifacts) come back; your own uploads are listable
+and referenceable but not readable.  Unlike the Skills API's hard
+25\,MB per-file and 100\,MB total caps, the Files API has no
+client-side size limit --- whatever the server accepts goes
+through.
+
+For attaching uploaded files to message content see
+\S\ref{sec:content-blocks}; for the sibling Skills API that shares
+the streaming multipart machinery see \S\ref{sec:skills}; for the
+exception hierarchy that every Files call can raise see
+\S\ref{sec:errors}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/files-create}.\quad
+Python SDK peer:
+\url{https://docs.anthropic.com/en/api/files-list}.}}
+
+\section{Skills API}
+\label{sec:skills}
+
+The Skills API packages a directory tree as a reusable, versioned
+artifact the model can load into a code-execution container on a
+Messages request.  A skill is a folder rooted at \texttt{SKILL.md}
+plus whatever supporting files the skill's scripts reference;
+uploading that folder gives back a skill id and a version id the
+model can mount by reference on any future turn.  The endpoint ships
+behind the \texttt{skills-2025-10-02} beta header; every skill URL
+also appends \texttt{?beta=true} inline, matching Anthropic's
+hosted-beta path convention (pagination requests follow the query
+string with \texttt{\&page=}).
+
+The Pharo surface splits across two packages by role.
+Request-side specs that bind into the Messages container ---
+\cls{ClaudeContainerParams} (the container shape) and
+\cls{ClaudeSkillSpec} (a single skill reference) --- live in
+\pkg{Claude-Messaging-Types} alongside \cls{ClaudeRequestOptions},
+because that is where a caller reaches for them when building a
+request.  Metadata responses, pagination wrappers, list-query
+params, and deletion receipts live in
+\pkg{Claude-Messaging-Skills}.
+
+\begin{center}
+\begin{tabular}{@{}lp{6.5cm}@{}}
+\toprule
+\textbf{Class} & \textbf{Role} \\
+\midrule
+\cls{ClaudeSkill} & Skill metadata response (id, display title,
+  source, latest version) \\
+\cls{ClaudeSkillVersion} & Versioned skill metadata response (id,
+  name, description, directory, version) \\
+\cls{ClaudeDeletedSkill} & Skill deletion response \\
+\cls{ClaudeDeletedSkillVersion} & Version deletion response \\
+\cls{ClaudeSkillPage} & Page-token-paginated list of skills \\
+\cls{ClaudeSkillVersionPage} & Page-token-paginated list of versions \\
+\cls{ClaudeSkillListParams} & List query (page, source filter, limit) \\
+\cls{ClaudeSkillVersionListParams} & Version list query (page, limit) \\
+\cls{ClaudeContainerParams} & Container request shape (id + skills
+  array, in \pkg{Claude-Messaging-Types}) \\
+\cls{ClaudeSkillSpec} & Skill ref for container loading
+  (\texttt{skill\_id} + \texttt{type} + \texttt{version}, in
+  \pkg{Claude-Messaging-Types}) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{sloppypar}
+Both \cls{ClaudeContainerParams} and \cls{ClaudeSkillSpec} carry an
+\sel{extraFields} slot so a \texttt{fromJson:}/\texttt{asJson}
+roundtrip preserves any wire keys Anthropic ships in the future;
+this mirrors the forward-compat pattern \cls{ClaudeMCPServerDefinition}
+established for the MCP connector, and means a consumer can read
+today's shape today without losing tomorrow's fields.  The beta
+header itself is hardcoded on the Skills HTTP client ---
+\sel{newSkillHttpClient} emits \texttt{anthropic-beta:
+skills-2025-10-02} unconditionally, so callers do not opt in via
+\texttt{betas:}, the same shape \sel{newFileHttpClient} uses for
+the Files API.
+\end{sloppypar}
+
+\begin{sloppypar}
+Uploads stream from disk in 64\,KB chunks via
+\cls{ClaudeStreamingMultiPartEntity}; even a skill at the 100\,MB
+total limit never materializes in VM memory.  The multipart body
+uses multiple \texttt{files[]} parts (the literal bracketed field
+name is what the server expects --- an unbracketed \texttt{files}
+field name is rejected), one part per file under the directory.
+The shared helper \sel{buildStreamingSkillPartsInto:fromDirectory:}
+assembles those parts for both \sel{uploadDirectory:displayTitle:}
+(new skill) and \sel{uploadVersionFor:fromDirectory:} (new version
+of an existing skill).  By contrast,
+\sel{uploadFile:filename:mimeType:} (Files API,
+\S\ref{sec:files}) drives \cls{ClaudeStreamingMultiPartEntity}
+directly without a shared helper --- the two APIs diverge enough in
+shape that a cross-API helper would cost more than it saves.
+Filenames in the multipart parts are prefixed with the upload
+directory's basename and use POSIX (forward-slash) separators, so a
+file at \texttt{skillDir/SKILL.md} serializes as
+\texttt{<basename>/SKILL.md} and a nested
+\texttt{skillDir/helpers/util.py} as
+\texttt{<basename>/helpers/util.py}; the server requires every
+uploaded file to live under a single top-level folder named after
+the skill.
+\end{sloppypar}
+
+Skills list endpoints return page-token pagination (\texttt{?page=}
+request, \texttt{next\_page} response field) rather than the Files
+API's cursor-id shape.  \cls{ClaudeSkillPage} and
+\cls{ClaudeSkillVersionPage} both expose a \sel{nextPage} slot
+(String or nil) and a derived \sel{hasMore} predicate, so a pager
+loop reads as a \texttt{[ page hasMore ] whileTrue:} driving the
+next \sel{page:} on the list-params.
+
+\begin{sloppypar}
+On the container side, \cls{ClaudeRequestOptions} accepts either
+shape through its polymorphic \sel{container:} setter --- a plain
+String container id (back-compat with the original Code Execution
+Tool) or a \cls{ClaudeContainerParams} instance holding an id plus
+a skills array.  The dispatch happens in \sel{addFieldsTo:}, which
+emits the String verbatim when \texttt{isString} holds and calls
+\texttt{asJson} on the params otherwise; existing String-input
+callers keep working unchanged.  On the response side,
+\cls{ClaudeExecutionContainer} carries a \sel{skills} slot whose
+entries parse back as \cls{ClaudeSkillSpec} instances --- the
+in-container response shape is identical to the request-side spec
+(\texttt{skill\_id}, \texttt{type}, \texttt{version}), so one class
+serves both.
+\end{sloppypar}
+
+\begin{sloppypar}
+Before a single byte leaves the client,
+\sel{uploadDirectory:displayTitle:} (via
+\sel{buildStreamingSkillPartsInto:fromDirectory:}) enforces three
+preconditions and raises a plain \cls{Error} with a pinned
+message format for each, so a caller sees a clear precondition
+failure instead of a 400 round-trip.  The guards fire in a fixed
+order: first, \texttt{SKILL.md} must exist at the upload directory
+root; second, the directory basename must match the \texttt{name:}
+field in \texttt{SKILL.md}'s YAML frontmatter, which the guard
+parses line-by-line inside the leading \texttt{---}~\ldots~\texttt{---}
+block (no YAML parser dependency); third, every file must be under
+\cls{ClaudeClient} \sel{maxSkillFileBytes} (25\,MB = 26,214,400
+bytes) and the summed upload under \sel{maxSkillUploadBytes}
+(100\,MB = 104,857,600 bytes).  A skill whose directory name
+disagrees with the frontmatter AND whose files are oversized
+reports the name mismatch first; the precedence matters because
+the caller usually wants to know about the cheaper fix before the
+more expensive one.
+\end{sloppypar}
+
+Deletion is two-phase by server contract: \sel{deleteSkill:}
+rejects a skill that still has versions, so the caller must
+enumerate via \sel{listVersionsFor:} and call \sel{deleteVersion:for:}
+on each before the skill itself can go.  The SDK does not ship a
+cascade helper in v1.0; a follow-up bead tracks adding one if the
+two-step dance turns out to be a papercut in practice.
+
+\begin{lstlisting}[language={},title={Skills API}]
+"Upload a skill directory; returns a ClaudeSkill metadata response"
+| client skill request |
+client := ClaudeClient apiKey: 'sk-ant-...'.
+skill := client
+    uploadDirectory: 'skills/python-data-analysis' asFileReference
+    displayTitle: 'Python data analysis'.
+
+"Build a Messages request that loads the skill into its container"
+request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 1024;
+    "Polymorphic container: either a String id or ClaudeContainerParams"
+    container: (ClaudeContainerParams new
+        skills: { ClaudeSkillSpec new
+            skillId: skill id;
+            type: 'custom';
+            "Explicitly pin the current published version; omit version: to let Anthropic use the latest published version"
+            version: skill latestVersion;
+            yourself };
+        yourself);
+    addUserMessage: 'Use the python-data-analysis skill to plot ...';
+    yourself.
+\end{lstlisting}
+
+For the sibling Files API that shares \cls{ClaudeStreamingMultiPartEntity}
+see \S\ref{sec:files}; for the feature-guide companion that frames
+when to reach for a skill versus a tool see \S\ref{sec:agent-skills};
+for the Messages request the container binds into see
+\S\ref{sec:messages}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/skills-guide}.}}
+
+\section{Prompt Tools API}
+\label{sec:prompt-tools}
+
+Prompt Tools is Anthropic's set of helper endpoints for developing
+and improving prompts programmatically: \texttt{generate} drafts a
+first-pass prompt from a task description, \texttt{templatize}
+extracts variables from a concrete prompt, and \texttt{improve}
+proposes revisions to an existing prompt.  The intended use case is
+prompt-engineering automation --- CI-driven A/B workflows, batch
+prompt iteration, agent build pipelines that evolve their own
+prompts --- rather than per-turn production traffic.  The endpoints
+live under \texttt{/v1/experimental/}, which is Anthropic's signal
+that the shape may change before graduating to stable.
+
+The Pharo SDK does not ship Prompt Tools in v1.0.  The experimental
+path is the reason: a typed Smalltalk surface built against
+\texttt{/v1/experimental/} today would likely require a breaking
+revision when Anthropic moves the endpoints out of that path, and
+the SDK's v1.0 promise is to freeze the public types we ship.
+\cls{ClaudeClient} exposes no \texttt{generatePrompt:},
+\texttt{templatizePrompt:}, or \texttt{improvePrompt:} selectors,
+and no request/response classes exist for the three endpoints.
+The Phase 2 plan is to add the typed surface when the endpoints
+leave \texttt{/v1/experimental/}; until then, teams that need these
+capabilities call the endpoints directly via \texttt{ZnClient}
+against the raw URL.  This section is reference material; no
+runnable example applies.
+
+For the Messages API that the generated and improved prompts
+ultimately feed into see \S\ref{sec:messages}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Not yet implemented}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/prompt-tools-generate}.}}
+
+\section{Admin API}
+\label{sec:admin}
+
+The Admin API is Anthropic's operator-facing control plane: it
+manages organizations, workspaces, members, and API keys; it
+reports Usage and Cost; it exposes Claude Code Analytics.  The
+audience is a platform operator auditing spend, provisioning keys
+for new teams, attributing cost across workspaces, or pulling
+analytics into a monitoring stack.  Requests are gated by a
+distinct \emph{Admin API key}, separate from the standard API key
+the Messages surface uses, and minted from the admin console
+rather than the developer console.
+
+The Pharo SDK does not ship the Admin API in v1.0.  The scope
+declaration in \S\ref{sec:overview} targets the standard messaging
+surface --- send, stream, tool use, files, skills --- because that
+is what an agent developer reaches for; the Admin surface is a
+different product with a different key and a different user.
+\cls{ClaudeClient} exposes no admin selectors, and no
+organization/workspace/member/key-management classes exist in the
+Messaging-layer packages.  The Phase 2 plan, when user demand
+materializes, is likely a separate \texttt{ClaudeAdminClient} (or
+an opt-in admin surface activated with the Admin API key) rather
+than overloading \cls{ClaudeClient}; the two key types and the two
+user journeys are distinct enough that blending them into one
+client would be more confusing than helpful.  This is operator
+surface, not developer surface.  This section is reference
+material; no runnable example applies.
+
+For the scope declaration that tracks SDK-level omissions see
+\S\ref{sec:overview}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Not yet implemented}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/api/administration-api}.}}
+
+
+\part{Build with Claude}
+
+\section{Streaming Messages}
+\label{sec:streaming}
+
+Streaming delivers a response token-by-token as the model
+generates it, rather than forcing the caller to wait for the
+full completion.  The transport is Server-Sent Events: the same
+\texttt{POST /v1/messages} endpoint as
+\S\ref{sec:messages}, just with \texttt{stream: true} on the
+request.  Applications reach for streaming whenever a user is
+watching the response (chat UIs, IDE assistants, dashboards)
+so partial output shows up immediately instead of after a
+several-second round-trip.
+
+The Pharo SDK exposes two modes.  The block-callback form
+\sel{streamMessage:do:} is the idiomatic path for most
+applications: it opens the stream, reads events into typed
+dictionaries, hands each event to the caller's block, and
+returns the fully accumulated \cls{ClaudeMessage} when the
+stream closes.  The raw-socket form \sel{openStreamingSocket:}
+is the lower-level path for callers that need to interleave
+reads with other work (a \cls{SharedQueue} producer/consumer
+pattern, a forked UI updater, etc.); it returns the socket for
+the caller to drive directly through \cls{ClaudeSSEDecoder}.
+The runnable example below uses \sel{streamMessage:do:} and is
+the primary shape a first-time reader should try.  It is the
+canonical doctest from \texttt{ClaudeClient}'s class comment:
+
+\begin{lstlisting}[language={}]
+| client request final |
+client := ClaudeSDKExampleSupport resolveClient.
+request := ClaudeMessageRequest new
+	model: ClaudeModel opus46;
+	maxTokens: 1024;
+	addUserMessage: 'Count to five.';
+	yourself.
+final := client streamMessage: request do: [ :event |
+	(event at: 'event') = 'content_block_delta' ifTrue: [
+		| delta |
+		delta := (event at: 'data') at: 'delta'.
+		Transcript show: (delta at: 'text' ifAbsent: [ '' ]) ] ].
+Transcript cr; show: 'stop reason: ', final stopReason.
+\end{lstlisting}
+
+Each \texttt{event} the block receives is a Dictionary with two
+String keys: \texttt{'event'} is the SSE event-type String
+(\texttt{'message\_start'}, \texttt{'content\_block\_delta'},
+\ldots), and \texttt{'data'} is the parsed-JSON Dictionary
+payload.  The block runs synchronously inside
+\sel{streamMessage:do:}; when the stream closes,
+\sel{streamMessage:do:} returns the accumulated
+\cls{ClaudeMessage} with every content block finalized, the
+stop reason set, and the token-usage counts populated --- the
+same shape a non-streaming \sel{sendMessage:} would have
+returned.
+
+\subsection{SSE Protocol}
+
+The streaming API returns Server-Sent Events (SSE) --- a text
+protocol where each event is a pair of lines (event type, JSON
+data) separated from the next event by a blank line.  Event
+types identify what happened (message started, block appended,
+delta arrived); the data payload carries the structured
+details.  A minimal SSE framing looks like:
+
+\begin{lstlisting}[language={}]
+event: message_start
+data: {"type":"message_start","message":{...}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}
+
+event: message_stop
+data: {"type":"message_stop"}
+\end{lstlisting}
+
+\subsection{Event Types}
+
+The eight event types the SDK recognizes map one-to-one to the
+steps \cls{ClaudeMessage} walks while assembling a response
+from deltas.  \texttt{message\_start} delivers the empty
+envelope (id, role, model, initial usage counts);
+\texttt{content\_block\_start} announces a new content block
+(text, tool use, thinking, \ldots) with its index;
+\texttt{content\_block\_delta} carries the incremental payload
+keyed on the delta subtype; \texttt{content\_block\_stop}
+finalizes the block so streaming accumulators can parse any
+partial-JSON buffers; \texttt{message\_delta} updates stop
+reason, stop sequence, and the final usage counters;
+\texttt{message\_stop} closes the stream; \texttt{ping} is a
+heartbeat the SDK ignores silently; \texttt{error} carries an
+API error that the client translates into a typed
+\cls{ClaudeApiError} subclass:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lp{7.5cm}@{}}
+\toprule
+\textbf{Event} & \textbf{Payload} \\
+\midrule
+\texttt{message\_start}        & Envelope for an empty \cls{ClaudeMessage} (id, role, model, initial usage) \\
+\texttt{content\_block\_start} & Content block type and index; creates the right \cls{ClaudeContentBlock} subclass \\
+\texttt{content\_block\_delta} & Incremental text, input JSON, thinking, signature, or citation \\
+\texttt{content\_block\_stop}  & Block index (finalization signal) \\
+\texttt{message\_delta}        & Stop reason, stop sequence, final output-token count \\
+\texttt{message\_stop}         & End of stream \\
+\texttt{ping}                  & Heartbeat (ignored) \\
+\texttt{error}                 & Error during streaming; raised via \texttt{ClaudeApiError fromSseErrorData:} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The \texttt{content\_block\_delta} payload is polymorphic,
+discriminated by its own \texttt{delta.type} field.  Five delta
+subtypes cover every incremental update the server emits; each
+maps to a specific field on the active content block:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{6cm}@{}}
+\toprule
+\textbf{Delta Type} & \textbf{Field} & \textbf{Description} \\
+\midrule
+\texttt{text\_delta}        & \texttt{text}          & Incremental text content \\
+\texttt{input\_json\_delta} & \texttt{partial\_json} & Incremental tool-input JSON (parsed at \texttt{content\_block\_stop}) \\
+\texttt{thinking\_delta}    & \texttt{thinking}      & Incremental extended-thinking text \\
+\texttt{signature\_delta}   & \texttt{signature}     & Thinking block signature \\
+\texttt{citations\_delta}   & \texttt{citation}      & Citation reference appended to the active text block \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{SSE Decoder}
+
+\cls{ClaudeSSEDecoder} parses raw SSE text into typed event
+dictionaries and supports two calling shapes matching the two
+modes above.  The buffered shape --- \sel{parse:do:} --- takes a
+complete SSE response body as a String and calls the caller's
+two-argument block once per event with
+\texttt{(eventType, dataDictionary)}.  Because the full body is
+received before the first callback fires, buffered mode is
+simpler but loses the latency win.  Callers that already have
+the raw body (for example, after \sel{streamRawBody:}) use it
+when they just want to iterate the event stream post hoc:
+
+\begin{lstlisting}[language={}]
+| body |
+"Fetch the full SSE body as a String, then iterate the events."
+body := client streamRawBody: request.
+ClaudeSSEDecoder new
+    parse: body
+    do: [ :eventType :data |
+        "eventType is a String; data is a Dictionary (or nil on unparseable)."
+        self handleEvent: eventType data: data ].
+\end{lstlisting}
+
+The incremental shape --- \sel{onStream:} plus \sel{hasNext}
+and \sel{nextEvent} --- reads lines off an underlying stream
+until a blank line completes an event, then returns the
+assembled Dictionary.  This is the shape a \cls{SharedQueue}
+producer uses so a consumer process can handle events as they
+arrive while the producer reads the socket.  The standard
+producer/consumer pattern pairs \sel{openStreamingSocket:}
+with \sel{ClaudeSSEDecoder onStream:} and a \cls{SharedQueue};
+the producer forks at \texttt{userBackgroundPriority}, the
+consumer defers UI updates to the Morphic thread via
+\texttt{WorldState defer:}:
+
+\begin{lstlisting}[language={}]
+| queue process message |
+queue := SharedQueue new.
+message := ClaudeMessage new.
+
+"Producer: read the TLS socket in a background process."
+process := [ | socket decoder |
+  socket := client openStreamingSocket: request.
+  decoder := ClaudeSSEDecoder onStream: socket.
+  [ decoder hasNext ] whileTrue: [
+    queue nextPut: decoder nextEvent ].
+  queue nextPut: #end ]
+    forkAt: Processor userBackgroundPriority
+    named: 'Claude SSE reader'.
+
+"Consumer: process events as they land on the queue."
+[ | event |
+  event := queue next.
+  event == #end ] whileFalse: [
+    message accumulate: event.
+    "Push partial content to the UI on the Morphic thread."
+    WorldState defer: [
+      textMorph contents: message textContent ] ].
+\end{lstlisting}
+
+\sel{openStreamingSocket:} returns a \cls{ClaudeStreamingSocket}
+when the client's \texttt{baseUrl} is an HTTPS endpoint: it
+opens a TCP socket, wraps it in \cls{ZdcSecureSocketStream}
+with Server Name Indication, sends the HTTP/1.1 POST request
+(stream mode true, every required header set), reads the
+response status line and headers, and verifies a 2xx status ---
+non-2xx raises a typed \cls{ClaudeApiError}.  When the
+\texttt{baseUrl} is an HTTP URL (mock servers in tests), the
+same selector returns a \cls{ReadStream} over the buffered
+body so tests don't need TLS infrastructure.  Both return
+types are compatible with the decoder's
+\sel{atEnd} / \sel{nextLine} protocol.  Per-read timeout on
+the TLS socket comes from \texttt{streamingTimeout} on
+\cls{ClaudeClient}, default 300s.  The decoder itself exposes a
+small protocol for callers that drive it directly:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llp{6cm}@{}}
+\toprule
+\textbf{Method} & \textbf{Returns} & \textbf{Behavior} \\
+\midrule
+\sel{onStream:}  & \cls{ClaudeSSEDecoder} &
+  Class-side factory.  Wraps any object answering
+  \sel{atEnd} / \sel{nextLine}.  Initializes the line buffer
+  and event accumulator. \\
+\sel{hasNext}    & Boolean &
+  Reads lines from the stream until a complete event is
+  assembled (blank line) or the stream ends.  Returns
+  \texttt{true} when an event is ready, \texttt{false} at
+  end-of-stream.  Blocks on the socket read --- must run in a
+  background Process when the stream is a live socket. \\
+\sel{nextEvent}  & Dictionary &
+  Returns the last assembled event as
+  \texttt{Dictionary('event' -> type. 'data' -> dict)}.
+  Call only after \sel{hasNext} returned \texttt{true}. \\
+\sel{close}      & --- &
+  Closes the underlying stream. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Line parsing follows the SSE specification: a line beginning
+with \texttt{event:} sets the event type for the pending event,
+a line beginning with \texttt{data:} appends to the data
+buffer, a blank line dispatches, and a line beginning with
+\texttt{:} is a comment and is ignored.
+\sel{streamMessage:do:} wraps the decoder loop in a
+\texttt{ConnectionTimedOut} handler that re-raises as
+\cls{ClaudeTimeoutError} (HTTP 408, retryable at the caller
+level) and a \texttt{NetworkError} handler that re-raises as
+\cls{ClaudeNetworkError} (synthetic 599, non-retryable);
+callers that drive the decoder directly through
+\sel{openStreamingSocket:} handle the same two exception
+classes themselves.  To cancel an in-flight stream, terminate
+the producer process --- the socket is closed on process
+termination:
+
+\begin{lstlisting}[language={}]
+"Kill the background reader; the socket is closed during termination."
+process terminate.
+\end{lstlisting}
+
+\subsection{Message Accumulator}
+
+\cls{ClaudeMessage>>accumulate:} builds a complete message
+from a sequence of streaming events and is what
+\sel{streamMessage:do:} calls under the hood to assemble the
+return value.  The method reads the \texttt{'event'} key off
+each event dictionary and dispatches to a private handler per
+event type: \texttt{message\_start} initializes id, type, turn,
+role, model, and usage; \texttt{content\_block\_start}
+instantiates the matching \cls{ClaudeContentBlock} subclass
+via the type registry and appends it to the active turn's
+content; \texttt{content\_block\_delta} sends \sel{applyDelta:}
+to the last block, which dispatches polymorphically on the
+delta subtype (\texttt{text\_delta} concatenates into
+\texttt{text}, \texttt{input\_json\_delta} buffers into
+\texttt{partial\_json}, \texttt{thinking\_delta} and
+\texttt{signature\_delta} concatenate into
+\texttt{thinking}/\texttt{signature}, \texttt{citations\_delta}
+appends one \cls{ClaudeCitation} to the active text block's
+citations); \texttt{content\_block\_stop} calls
+\sel{finalizeAfterStreaming} on the last block so
+tool-use/MCP-tool-use blocks can parse their accumulated
+partial-JSON buffer into a proper Dictionary;
+\texttt{message\_delta} merges the final stop reason, stop
+sequence, and updated output-token count; \texttt{error}
+raises the matching \cls{ClaudeApiError} subclass via
+\texttt{ClaudeApiError class>>fromSseErrorData:}.
+
+The net effect is that after \sel{streamMessage:do:} returns,
+the accumulated \cls{ClaudeMessage} is indistinguishable from
+the \sel{sendMessage:} response you would have gotten had you
+called the non-streaming variant --- same content blocks, same
+stop reason, same usage counts.  The Pharo-specific threading
+model for streaming (forking the producer process, deferring
+to the Morphic thread) lives in the companion
+\emph{Pharo-Specific Implementation Notes} under the Pharo
+Threading Model section.
+
+For the non-streaming \sel{sendMessage:} counterpart and the
+full Messages API surface see \S\ref{sec:messages}; for how
+mid-stream SSE errors are routed into the typed exception
+hierarchy see \S\ref{sec:errors}; for extended thinking ---
+which delivers its own \texttt{thinking\_delta} and
+\texttt{signature\_delta} events alongside the normal text
+deltas --- see \S\ref{sec:thinking}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs:
+\url{https://docs.claude.com/en/docs/build-with-claude/streaming}.\quad
+Python SDK peer:
+\url{https://docs.anthropic.com/en/api/messages-streaming}.}}
+
+\section{Prompt Caching}
+\label{sec:prompt-caching}
+
+Mark a text block, tool definition, or tool-result block as
+cacheable, and Anthropic caches the serialized prefix across
+requests sharing the same API key --- subsequent requests pay a
+fraction of the input-token cost on whatever's cached.  The Pharo
+primitive is \texttt{ClaudeCacheControl}, a small value object
+that serializes to \texttt{\{"type":"ephemeral"\}} with an
+optional \texttt{"ttl"} of \texttt{'5m'} or \texttt{'1h'}.  The
+on-wire shape is identical to the Python SDK's
+\texttt{cache\_control=\{"type": "ephemeral"\}} block parameter;
+the Pharo class just wraps it in a typed object you can pass
+around and inspect.
+
+The class-side factories build a marker; \texttt{asJson} converts
+it to the wire-format Dictionary.  The default is the
+five-minute ephemeral cache; \texttt{ephemeralWithTTL:} sets a
+custom TTL (Anthropic currently accepts only \texttt{'5m'} and
+\texttt{'1h'}).  Both forms appear below as their own runnable
+expressions:
+
+\begin{lstlisting}[language={}]
+"Build a default-TTL marker and serialize it for the wire."
+ClaudeCacheControl ephemeral asJson
+"=> an OrderedDictionary('type'->'ephemeral')"
+
+"Build a marker with an explicit five-minute TTL."
+(ClaudeCacheControl ephemeralWithTTL: '5m') asJson
+"=> an OrderedDictionary('type'->'ephemeral' 'ttl'->'5m')"
+\end{lstlisting}
+
+To use prompt caching in an application, mark a content block as
+cacheable and send the request through \texttt{ClaudeClient} as
+you would any other.  The most common pattern caches a long
+system prompt or RAG prefix.  \texttt{ClaudeMessageRequest}'s
+\texttt{systemBlocks:} setter takes a collection of
+\texttt{ClaudeTextBlock} instances, one or more of which can
+carry a cache marker:
+
+\begin{lstlisting}[language={}]
+| client request response |
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 1024;
+    systemBlocks: {
+        (ClaudeTextBlock text: 'You are a helpful assistant. <long reusable instructions...>')
+            cacheControl: ClaudeCacheControl ephemeral };
+    addUserMessage: 'What is the capital of France?';
+    yourself.
+
+response := client sendMessage: request.
+response usage cacheCreationInputTokens.  "tokens written to cache (first-call miss)"
+response usage cacheReadInputTokens.      "tokens served from cache (subsequent hits)"
+\end{lstlisting}
+
+\begin{sloppypar}
+The first call pays full input cost on the marked prefix and
+writes it to the cache (\texttt{cacheCreationInputTokens});
+subsequent calls within the TTL pay a fraction
+(\texttt{cacheReadInputTokens} reflects what the cache served).
+Both counters live on \texttt{ClaudeUsage}, which is on every
+Messages response --- no extra API call is needed to observe
+cache effectiveness.
+\end{sloppypar}
+
+Caching tool definitions and tool-result prefixes follows the
+same shape, but the wiring details differ.  The SDK exposes six
+\texttt{cacheControl:} setters across six classes
+(\texttt{ClaudeMessageRequest}'s is a convenience that delegates to
+\texttt{ClaudeRequestOptions}), split into two groups depending on
+\emph{when} the marker gets serialized.  \texttt{ClaudeTextBlock}
+and \texttt{ClaudeServerTool} take the \texttt{ClaudeCacheControl}
+instance directly --- they call \texttt{asJson} on it themselves at
+request-serialization time.  \texttt{ClaudeTool},
+\texttt{ClaudeToolResultBlock}, \texttt{ClaudeRequestOptions}, and
+\texttt{ClaudeMessageRequest} (which delegates to
+\texttt{ClaudeRequestOptions}) take the already-serialized
+Dictionary --- you call \texttt{asJson} yourself before passing it
+in.  The split is deliberate: the
+second group's \texttt{cacheControl:} setters predate the typed
+wrapper, and tightening them would break callers that already
+pass raw dictionaries.  The Pharo type system doesn't catch the
+mismatch, so the rule of thumb is: \texttt{ClaudeTextBlock} and
+\texttt{ClaudeServerTool} take an instance; everything else takes
+\texttt{... asJson}.
+
+\begin{lstlisting}[language={}]
+"Cache a tool definition (raw-Dictionary group: pass ... asJson)"
+| tool |
+tool := ClaudeTool
+    name: 'analyze'
+    description: 'Analyze code'
+    inputSchema: ClaudeToolInputSchema new.
+tool cacheControl: ClaudeCacheControl ephemeral asJson.
+
+"Cache a tool-result prefix that the model already saw on the previous turn"
+(ClaudeToolResultBlock toolUseId: 'tu_123' content: 'result')
+    cacheControl: (ClaudeCacheControl ephemeralWithTTL: '5m') asJson.
+\end{lstlisting}
+
+Three constraints are worth planning around.  Anthropic enforces
+a maximum of four \texttt{cache\_control} markers per request
+server-side, so put them on the largest static prefixes first ---
+the system prompt, the tool definitions, the RAG context.  TTL
+values currently support only \texttt{'5m'} (five minutes) and
+\texttt{'1h'} (one hour); the SDK keeps them as strings so a
+future addition like \texttt{'24h'} would need no code change.
+And the only \texttt{type} Anthropic exposes is
+\texttt{ephemeral}; a future \texttt{persistent} type would land
+as a new class-side factory
+(\texttt{ClaudeCacheControl persistent}) rather than a new
+instance variable.
+
+For the content-block classes that carry cache markers see
+\S\ref{sec:content-blocks}; for \texttt{ClaudeTool} and
+\texttt{ClaudeServerTool} see \S\ref{sec:tool-use}; for where
+\texttt{ClaudeUsage}'s cache fields surface on the response
+envelope see \S\ref{sec:messages}.
+
+\medskip
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/docs/build-with-claude/prompt-caching}.\quad
+Python SDK peer:
+\url{https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching}.}}
+
+\section{Extended Thinking}
+\label{sec:thinking}
+
+Extended thinking asks Claude to reason before answering and returns
+that reasoning as a separate content-block type the application can
+display, hide, or audit.  An agent that writes code, solves a
+multi-step math problem, or synthesizes a long document benefits from
+visible chain-of-thought: the thinking blocks carry the intermediate
+steps, and the final \texttt{ClaudeTextBlock} carries the answer.
+Applications that surface reasoning to end users (tutoring,
+code-review assistants, evaluation harnesses) read the thinking
+blocks alongside the answer; applications that only need the answer
+discard them.  The feature is opt-in per request and controlled by a
+token budget --- small budgets produce no thinking, large budgets
+produce detailed reasoning, and the model chooses how much of the
+budget to spend.
+
+\begin{sloppypar}
+The Pharo surface has three pieces.  \texttt{ClaudeThinkingParams}
+configures the request: \texttt{enabled:} takes an Integer budget in
+tokens (required), \texttt{adaptive} lets Anthropic size the budget,
+and \texttt{disabled} turns thinking off.  \texttt{ClaudeMessageRequest}
+accepts the thinking configuration through its \texttt{thinking:}
+setter, which takes a Dictionary --- pass the params object's
+\texttt{asDictionary} form.  On the response,
+\texttt{ClaudeThinkingBlock} subclasses \texttt{ClaudeContentBlock}
+with an \texttt{isThinkingBlock} predicate and \texttt{thinking}
+accessor; redacted reasoning (which Anthropic occasionally replaces
+for safety) arrives as the sibling
+\texttt{ClaudeRedactedThinkingBlock} type carrying opaque
+\texttt{data} the application must round-trip verbatim without
+inspection.
+\end{sloppypar}
+
+The runnable below enables thinking with a 1024-token budget, sends
+the request, and filters the response content for the thinking
+block.  Anthropic requires \texttt{max\_tokens > budget\_tokens}, so
+\texttt{maxTokens} is set to 2048 to leave room for both the
+reasoning budget and the final answer:
+
+\begin{lstlisting}[language={}]
+| client request response thinkingBlock |
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+"Enable thinking with a 1024-token reasoning budget. The factory
+ returns a ClaudeThinkingParams instance; asDictionary converts it
+ to the wire-format Dictionary that thinking: expects."
+request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 2048;
+    thinking: (ClaudeThinkingParams enabled: 1024) asDictionary;
+    addUserMessage: 'What is the Monty Hall problem? Show your reasoning, then give the final answer.';
+    yourself.
+
+response := client sendMessage: request.
+
+"Response content is an OrderedCollection of ClaudeContentBlock.
+ detect:ifNone: picks the first thinking block; nil-guard the lookup
+ because the model may skip thinking on simple prompts even when
+ enabled."
+thinkingBlock := response content
+    detect: [ :b | b isThinkingBlock ]
+    ifNone: [ nil ].
+thinkingBlock ifNotNil: [ :b |
+    Transcript show: b thinking; cr ].
+
+"The final answer is still in the text block; textContent joins all
+ text blocks in response order."
+response textContent
+\end{lstlisting}
+
+Three details shape how an application uses the feature.  Budget
+tuning ships today: \texttt{budgetTokens} is a real instance
+variable that \texttt{enabled:} sets directly, and a budget below
+roughly 1024 tokens often yields no thinking block at all because
+the model decides the problem does not warrant deliberation.  Larger
+budgets give the model more room to reason but cost more
+input-equivalent tokens and extend response latency; the idiomatic
+starting point is 1024.  The three modes serve different workloads:
+\texttt{enabled:} pins a fixed budget (predictable latency and
+cost), \texttt{adaptive} lets Anthropic size the budget to the
+prompt (simpler to configure), and \texttt{disabled} turns thinking
+off when a previously-enabled request template is being reused for a
+quick query.  And the adaptive mode accepts an optional display hint
+via \texttt{adaptiveWithDisplay:} (\texttt{'summarized'} or
+\texttt{'omitted'}) controlling what the UI receives.
+
+Two further pieces shape multi-turn agents that consume thinking.
+The first is the signature round-trip.  Every
+\texttt{ClaudeThinkingBlock} returned by the API carries an opaque
+cryptographic \texttt{signature} the server computes from the
+thinking content plus server-side secrets.  When an application
+replays a prior assistant turn back to the model --- the standard
+shape of multi-turn tool-use loops --- the signature must arrive at
+the server byte-for-byte unchanged or the request is rejected.  The
+SDK preserves the signature automatically: \texttt{asJson} on a
+\texttt{ClaudeThinkingBlock} emits the \texttt{signature} field, and
+\texttt{ClaudeMessageRequest>>asJson} carries it through the
+serialized assistant turn.  Applications writing thinking-aware
+agents get the round-trip for free; the discipline is pinned by
+\texttt{ClaudeThinkingBlockTest>>testSignatureRoundTrip} (the wire
+path) and
+\texttt{ClaudeThinkingBlockTest>>testStonSignatureRoundTrip} (the
+persisted-session path used by repository-backed conversations).
+
+The second is interleaved thinking.  By default the model emits at
+most one thinking block per response, before the final text answer.
+With the \texttt{interleaved-thinking-2025-05-14} beta the model may
+emit a thinking block in \emph{every} assistant turn --- including
+the turns that wrap individual tool calls.  Tool-use-heavy agents
+benefit because the model can reason about each tool result in turn,
+choose the next call deliberately, and reason between calls rather
+than only at the end of the response.  Whether that intermediate
+reasoning reaches the end user is governed separately by
+\texttt{adaptiveWithDisplay:} earlier in this section
+(\texttt{'summarized'} or \texttt{'omitted'}).
+Opt in per request:
+
+\begin{lstlisting}[language={}]
+request betas: { ClaudeBetaHeader interleavedThinking }.
+\end{lstlisting}
+
+The runnable
+\texttt{ClaudeInterleavedThinkingExample class>>buildRequest}
+constructs a multi-turn conversation where two prior assistant
+turns each carry their own thinking block plus a tool-use block,
+with tool results between them.  The request is structural: its
+thinking blocks carry placeholder signatures chosen for clarity
+in the doctest, and those placeholders must be replaced with real
+signatures captured from a prior live response before the request
+can be sent successfully to the API.  The example still doubles
+as a test fixture: the placeholder signatures round-trip through
+the wire serializer, demonstrating exactly the discipline the
+previous paragraph describes.
+
+For \texttt{ClaudeMessageRequest}'s other request knobs and the
+in-flight request object see \S\ref{sec:messages}; for how thinking
+interacts with tool calls see \S\ref{sec:tool-use}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs:
+\url{https://docs.claude.com/en/docs/build-with-claude/extended-thinking}.}}
+\end{sloppypar}
+
+\section{Context Editing}
+\label{sec:context-editing}
+
+Context editing is a server-side set of strategies for trimming
+long conversations to fit within Claude's context window.  Anthropic
+exposes it as a \texttt{context\_management} request parameter with
+named strategies: \texttt{clear\_tool\_uses\_20250919} drops
+tool-call and tool-result pairs older than a threshold,
+\texttt{clear\_thinking\_20251015} drops thinking blocks from
+earlier turns.  Agents that run long tool-use loops accumulate
+thousands of tokens of obsolete tool output each turn; a multi-day
+conversation retaining every thinking block rapidly exhausts the
+window.  Context editing lets the server drop the old material
+without the client rebuilding the conversation history locally ---
+cheaper than shuttling every turn through a summarizer and more
+principled than unbounded growth.
+
+The feature is opted in via the \texttt{context-management-2025-06-27}
+beta header (see \S\ref{sec:beta-headers}) plus the
+\texttt{context\_management} request parameter naming one or more
+strategies and their thresholds.  Anthropic's docs describe the
+current strategy set; the set expands as new editing passes land.
+
+\begin{sloppypar}
+The Pharo SDK does not implement context editing today.
+\texttt{ClaudeRequestOptions} carries no
+\texttt{context\_management} slot, \texttt{ClaudeMessageRequest}
+exposes no setter for it, and the request serializer does not emit
+the field.  When implemented, Pharo will expose a typed
+\texttt{ClaudeContextManagement} class with enumerated strategies
+and a \texttt{contextManagement:} setter on
+\texttt{ClaudeRequestOptions} matching the shape of
+\texttt{ClaudeThinkingParams} / \texttt{thinking:}.  This section
+is reference material; no runnable example applies.
+\end{sloppypar}
+
+For the beta header machinery that will carry the opt-in see
+\S\ref{sec:beta-headers}; for the scope declaration that tracks
+SDK-level omissions see \S\ref{sec:scope}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Not yet implemented}.\quad
+Anthropic docs:
+\url{https://docs.claude.com/en/docs/build-with-claude/context-editing}.}}
+\end{sloppypar}
+
+\section{Vision / Multimodal}
+\label{sec:vision}
+
+Vision lets Claude see images.  The user turn carries a content
+block whose type is \texttt{image} alongside any text blocks;
+Claude processes the image in its visual encoder and reasons about
+it the same way it reasons about text.  Applications use vision for
+chart and screenshot analysis, document OCR, photograph
+description, UI testing, and any workflow where the input arrives
+as pixels rather than characters.  Multiple images per turn are
+supported, and images mix freely with text blocks in the same
+request.
+
+Pharo wires vision through \texttt{ClaudeImageBlock}, which carries
+a \texttt{source} Dictionary shaped for the wire.  Three class-side
+factories cover the three source types.  \texttt{fromUrl:} points
+at a publicly-accessible image URL; Anthropic fetches and processes
+the image server-side.  \texttt{base64:mediaType:} carries the
+encoded bytes inline; nothing leaves the client beyond the request
+itself, which matters for images the application generates or
+derives from private data.  \texttt{fromFileId:} references an
+image uploaded earlier through the Files API
+(\S\ref{sec:files}); the server looks up the bytes by ID,
+avoiding a re-upload on every request when the same image is used
+across a long conversation.  Two convenience factories build on
+\texttt{base64:mediaType:}: \texttt{fromFile:} reads a local image
+file and infers the media type from the extension, and
+\texttt{fromForm:} captures a Pharo \texttt{Form} (e.g., a screenshot
+from \texttt{World imageForm}) as a PNG.
+
+The runnable below uses \texttt{fromUrl:} because it reads
+cleanest.  The image block and a text-block prompt are composed
+into a single user turn via \texttt{addUserContent:}, which accepts
+a collection of \texttt{ClaudeContentBlock} instances in arbitrary
+order:
+
+\begin{lstlisting}[language={}]
+| client image request response |
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+"Build the image block from a public URL. Anthropic will fetch and
+ process the image server-side; no local IO is required."
+image := ClaudeImageBlock fromUrl: 'https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png'.
+
+request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 1024;
+    "addUserContent: returns the added ClaudeMessage, not the request.
+     The cascade's yourself targets the original receiver (the request),
+     so the assignment captures the request object correctly."
+    addUserContent: { (ClaudeTextBlock text: 'Describe this image in one sentence.'). image };
+    yourself.
+
+response := client sendMessage: request.
+response textContent
+\end{lstlisting}
+
+The three factories choose based on where the image lives.  Public
+URL is simplest when the image already sits on a CDN or public
+host, costs no client-side bandwidth, and Anthropic's fetcher
+handles the download.  Base64 inline is the right default for
+images the application generates on the fly or derives from
+private sources the caller does not want to publish to a public
+URL --- the bytes travel in the request body and never leave the
+client's control boundary.  File-ID source is the right default
+for large images reused across many requests: upload once via the
+Files API, pay the upload cost once, and reference the ID on every
+subsequent request.  Both \texttt{fromURL:} and \texttt{fromUrl:}
+are accepted across \texttt{ClaudeImageBlock} and
+\texttt{ClaudeDocumentBlock} (\S\ref{sec:pdf}); either casing
+builds the same wire shape.
+
+The inline-source factories validate the raw byte count against
+Anthropic's 5\,MB per-image cap before encoding, so oversized
+inputs fail fast with a \texttt{ClaudeInvalidRequestError} rather
+than waiting for the server's 400 response.  URL and file-ID
+sources skip client-side validation --- the server validates at
+fetch or lookup time.
+
+Supported formats are PNG, JPEG, GIF, and WebP; Anthropic's docs
+carry the current per-image size and dimension limits and the
+per-request image count cap.
+
+For the content-block wire shape see \S\ref{sec:content-blocks};
+for the Files API used by \texttt{fromFileId:} see
+\S\ref{sec:files}; for the sibling document block that handles
+PDFs see \S\ref{sec:pdf}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs:
+\url{https://docs.claude.com/en/docs/build-with-claude/vision}.}}
+\end{sloppypar}
+
+\section{PDF / Document Block}
+\label{sec:pdf}
+
+PDF support lets Claude read a PDF inline the same way vision lets
+it read images.  Anthropic's server decodes the PDF, extracts
+text, figures, and tables, and feeds the material into the model's
+context alongside the rest of the user turn.  Applications use it
+for contract review, research-paper Q\&A, financial-report
+summarization, and any workflow where the source document is a PDF
+rather than markdown or plain text.  Short PDFs ride inline in the
+request body; large or frequently-reused PDFs upload once to the
+Files API and reference by ID on every subsequent request.
+Anthropic's docs cite a rough budget of 1500--3000 input tokens per
+page.
+
+\begin{sloppypar}
+Pharo represents documents through \texttt{ClaudeDocumentBlock},
+whose \texttt{source} slot holds a \texttt{ClaudeDocumentSource}
+subclass matching the wire-format source type.  Four class-side
+factories cover the four source types.  \texttt{fromFileId:}
+references a PDF uploaded earlier through the Files API
+(\S\ref{sec:files}) --- the production-idiomatic path for large or
+reused PDFs because it avoids re-uploading the bytes on every
+request.  \texttt{fromBase64:} carries the PDF bytes inline as a
+base64 string --- simplest for one-shot short PDFs where the
+upload round-trip would add more overhead than it saves.
+\texttt{fromText:} wraps already-extracted plain text in a document
+block --- useful when upstream code has done its own PDF parsing
+and wants the text treated as a document (for citations; see
+\S\ref{sec:citations}) rather than as an inline user message.
+\texttt{fromURL:} points at a publicly-accessible PDF;
+\texttt{fromUrl:} works as an alias for callers that prefer the
+lowercase convention (\S\ref{sec:vision} covers the same
+bidirectional alias on \texttt{ClaudeImageBlock}).
+\end{sloppypar}
+
+\begin{sloppypar}
+Applications that need to estimate request cost before sending a
+large PDF can call \texttt{tokensPerPageRange} on
+\texttt{ClaudeDocumentBlock}, which returns an \texttt{Interval}
+spanning Anthropic's rough 1500--3000 per-page budget.  Multiply
+by the page count for a minimum and maximum input-token estimate,
+or call \texttt{ClaudeClient>>countTokens:} for an exact count on
+the assembled request.
+\end{sloppypar}
+
+The runnable below uses \texttt{fromBase64:} because it runs
+end-to-end without a prior Files-API upload.  The document block
+and a text-block prompt compose into a single user turn the same
+way vision's image block does.  For production use with a large or
+reused PDF, swap \texttt{fromBase64:} for \texttt{fromFileId:} with
+the identifier returned by \texttt{ClaudeClient>>uploadFile:}:
+
+\begin{lstlisting}[language={}]
+| client doc request response |
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+"Carry the PDF bytes inline as a base64 string. The fixture below is
+ a minimal 1-page PDF (615 bytes raw, 820 base64 chars) lifted byte-
+ for-byte from ClaudeMessagingPDFExample>>examplePDFBase64. No beta
+ header is required for base64-inline PDFs."
+doc := ClaudeDocumentBlock fromBase64: ClaudeMessagingPDFExample examplePDFBase64.
+
+request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 1024;
+    "addUserContent: returns the added message; the cascade's
+     yourself targets the request so the assignment captures it."
+    addUserContent: { (ClaudeTextBlock text: 'Summarize the contents of this PDF in one sentence.'). doc };
+    yourself.
+
+response := client sendMessage: request.
+response textContent
+\end{lstlisting}
+
+Four source choices map to four setup costs.  \texttt{fromFileId:}
+amortizes a single upload across many requests and is the right
+default when the same PDF will be referenced repeatedly (multi-turn
+Q\&A over a fixed document).  \texttt{fromBase64:} skips the Files
+API entirely --- shortest code path, right when the PDF is short
+and used once.  \texttt{fromText:} is the escape hatch when the
+caller already has extracted text and wants document-aware
+handling (which currently matters chiefly for citations;
+non-extracted PDFs are far richer because Anthropic's server
+extracts figures and tables too).  \texttt{fromURL:} is the
+right default when the PDF lives on a public host the model
+should fetch directly.  URL-source PDFs require the
+\texttt{document-url-2025-04-15} beta header on the request; the
+base64 and file-ID paths have no beta dependency.
+
+For the Files API uploader see \S\ref{sec:files}; for the sibling
+image block see \S\ref{sec:vision}; for combining PDFs with
+citations see \S\ref{sec:citations}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs:
+\url{https://docs.claude.com/en/docs/build-with-claude/pdf-support}.}}
+\end{sloppypar}
+
+\section{Citations}
+\label{sec:citations}
+
+Citations give the application character-indexed pointers back to
+the source spans Claude used to produce its answer.  When a user
+turn carries a citation-enabled document, each assistant text block
+on the response arrives with a \texttt{citations} array naming the
+document and the start and end character offsets of the cited
+excerpt, plus the excerpt text itself.  Applications use citations
+for RAG grounding (the UI can link each sentence of the answer back
+to its source), audit trails (a reviewer can verify that every
+claim traces to the input), and compliance workflows where the
+answer must cite its evidence.  Unlike most Claude behaviour,
+citation content is uniquely server-computed: the cited excerpt is
+extracted from the raw document bytes the client sent, and the
+character offsets are assigned by the server's citation pipeline.
+A client cannot fabricate a citation.
+
+\begin{sloppypar}
+The Pharo surface has two halves.  On the request, the caller
+toggles citations on a \texttt{ClaudeDocumentBlock} with the typed
+trio \texttt{enableCitations}, \texttt{disableCitations}, and the
+\texttt{citationsEnabled} predicate.  Under the hood the enable
+slot holds the wire-shape Dictionary
+\texttt{\{ \#enabled -> true \} asDictionary} (mirroring
+\texttt{"citations": \{"enabled": true\}} on the JSON side); the
+typed methods exist so callers do not have to spell that shape by
+hand, and \texttt{disableCitations} sets the slot to \texttt{nil}
+so \texttt{asJson} omits the key entirely --- the API recognizes
+key omission as the opt-out, not an explicit
+\texttt{\{ enabled: false \}}.  The raw \texttt{citations:} setter
+remains available as an escape hatch for any future wire-shape
+additions.  Only documents carrying the enable marker are eligible
+for citation; asking about a plain text block produces no
+citations even when the answer is quoted verbatim.  On the
+response, each \texttt{ClaudeTextBlock} may carry a
+\texttt{citations} OrderedCollection of \texttt{ClaudeCitation}
+instances; the accessors are \texttt{citedText} (the extracted
+excerpt), \texttt{documentIndex} (the zero-based position of the
+cited document in the user turn's content array),
+\texttt{documentTitle} (the document's \texttt{title} field when
+set), \texttt{startCharIndex}, and \texttt{endCharIndex}.
+\end{sloppypar}
+
+The runnable below attaches a citations-enabled document to the
+user turn, sends the request, and iterates the response text blocks
+to surface every citation:
+
+\begin{lstlisting}[language={}]
+| client doc request response citedBlocks |
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+"Build the document block, set an optional title (which appears in
+ citations as documentTitle), and enable citations. The typed method
+ enableCitations sets the underlying slot to the wire-shape Dictionary
+ { #enabled -> true } asDictionary; callers who need to emit a
+ future wire extension can still reach for the raw citations: setter."
+doc := ClaudeDocumentBlock fromText: 'Pharo images save with open sockets. Restoring creates stale half-open descriptors. The preferred recovery path is to rebuild from clean Tonel source.'.
+doc title: 'Pharo Image Discipline'.
+doc enableCitations.
+
+request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 1024;
+    "addUserContent: returns the added message; yourself targets the
+     request receiver so the assignment captures it."
+    addUserContent: { (ClaudeTextBlock text: 'What is the recovery path for a saved image with stale sockets?'). doc };
+    yourself.
+
+response := client sendMessage: request.
+
+"Filter response text blocks to the ones carrying citations and
+ surface each citation with its excerpt and character range."
+citedBlocks := response content select: [ :b |
+    b isTextBlock and: [ b citations notNil and: [ b citations isNotEmpty ] ] ].
+citedBlocks do: [ :b |
+    b citations do: [ :c |
+        Transcript
+            show: '[', (c documentTitle ifNil: [ '?' ]), ' ',
+                c startCharIndex printString, '-', c endCharIndex printString,
+                ']: ', c citedText;
+            cr ] ]
+\end{lstlisting}
+
+Two design details shape how applications use the feature.  The
+enable marker lives on the document block, not the request, because
+a user turn can mix citation-enabled documents with non-citable
+text content --- per-block granularity lets the caller decide which
+sources the model may cite.  And the citation objects on the
+response point at character offsets in the original document bytes
+the client sent, which is what lets the UI highlight the exact
+span: the application holds the authoritative document and the
+citation tells it where to look.  Prompts that ask about a specific
+quoted claim (``what does the document say about X'') yield richer
+citations than open-ended summaries, because the model has a clear
+target to cite.
+
+For the document block and its four source factories see
+\S\ref{sec:pdf}; for citations on image-derived OCR see
+\S\ref{sec:vision}; for uploading the source documents through the
+Files API see \S\ref{sec:files}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs:
+\url{https://docs.claude.com/en/docs/build-with-claude/citations}.}}
+\end{sloppypar}
+
+\section{Search Results}
+\label{sec:search-results}
+
+Search results are a GA content-block type that Anthropic emits
+when a RAG document has been searched: each block wraps an excerpt
+the model retrieved and carries its own \texttt{citations} array
+tying the excerpt back to character offsets in the source.
+Applications use them to expose typed RAG responses where each
+retrieved snippet already comes citation-linked --- like §\ref{sec:citations}
+Citations, but inlined into a dedicated block type rather than
+attached to free-form text.  The right time to reach for search
+results is when the application runs a RAG pipeline with automatic
+citation wiring; sending raw documents and enabling citations on
+them (the §\ref{sec:citations} path) stays the right choice when
+the application supplies the documents itself and leaves retrieval
+to the model.
+
+\begin{sloppypar}
+The Pharo SDK does not implement the search-result content block
+today.  No \texttt{ClaudeSearchResultBlock} class exists in any
+\texttt{Claude-Messaging-*} package, no \texttt{search\_result}
+entry is registered in the \texttt{ClaudeContentBlock} type
+registry, and the block never decodes on the response --- an
+unrecognised type currently falls through to the raw-JSON
+preservation path rather than being materialised as a typed
+instance.  The server-tool sibling \texttt{ClaudeWebSearchResultBlock}
+is a different class and a different feature: it is the result
+block the built-in \texttt{web\_search} tool emits (see
+§\ref{sec:server-tools}), whereas the RAG \texttt{search\_result}
+block is a first-class content-block type the model may produce
+directly.  Phase 2 adds a typed \texttt{ClaudeSearchResultBlock}
+class, a \texttt{search\_result} entry in the content-block type
+registry, and a worked example demonstrating how the block's
+internal \texttt{citations} array surfaces through the response.
+\end{sloppypar}
+
+This section is reference material; no runnable example applies.
+
+For the response-side citation wire shape that the feature shares
+see §\ref{sec:citations}; for the server-tool web-search sibling
+see §\ref{sec:server-tools}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Not yet implemented}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/docs/build-with-claude/search-results}.}}
+\end{sloppypar}
+
+\section{Structured Outputs}
+\label{sec:structured-outputs}
+
+Structured outputs constrain the model's response to validate
+against a JSON Schema the caller provides.  The model is guaranteed
+--- not merely prompted --- to emit a document whose fields match
+the schema's property names, value types, and required keys, which
+lets the application parse the response as structured data without
+retry loops or validation layers on top.  Applications use the
+feature for form filling (extract named fields from a user
+utterance into a known record type), information extraction
+(normalize one shape into another across heterogeneous inputs),
+and API glue (treat the model's output as a typed payload the
+next service can consume directly).  Opt in by adding the
+\texttt{structured-outputs-2025-11-13} beta to the request and
+by supplying a format of shape
+\texttt{\{type: "json\_schema", schema: \{...\}\}} --- when both
+are present the server enforces the schema during generation.
+Anthropic's public documentation names the wire parameter
+\texttt{output\_format}, but the Pharo SDK's serializer (and the
+request body it produces) nests the format inside an
+\texttt{output\_config} object, so the on-the-wire JSON field is
+\texttt{output\_config.format} carrying the
+\texttt{\{type, schema\}} value.  The two are the same feature
+under two names; the Pharo SDK emits the grouped form because the
+same \texttt{output\_config} object also carries the reasoning
+\texttt{effort} hint described later in this section.
+
+\begin{sloppypar}
+Pharo exposes the feature through the \texttt{ClaudeOutputFormat}
+hierarchy and two request-side setters on \texttt{ClaudeMessageRequest}:
+\texttt{outputFormat:} takes a \texttt{ClaudeOutputFormat} instance
+(the public API), and \texttt{effort:} takes the optional
+reasoning-effort hint (\texttt{'low'}, \texttt{'medium'},
+\texttt{'high'}, \texttt{'xhigh'}, or \texttt{'max'}).  Internally
+the request aggregates both into a \texttt{ClaudeOutputConfig}
+value object held on the private \texttt{outputConfig} slot;
+callers reach the format and effort through the two public setters
+rather than assigning the config directly, which keeps the request
+API symmetric with other parameter groups (sampling params,
+thinking params) that also sit behind flat accessors on the
+request.
+\end{sloppypar}
+
+\begin{sloppypar}
+Two concrete format classes subclass \texttt{ClaudeOutputFormat}.
+\texttt{ClaudeTextOutputFormat} is the default plain-text output
+and is client-side only: its \texttt{asJson} returns \texttt{nil}
+so the serializer omits \texttt{output\_config} from the wire
+payload entirely (equivalently, it omits what Anthropic's docs
+call the \texttt{output\_format} parameter), and its
+\texttt{encoding} (\texttt{\#ascii}, \texttt{\#latin1},
+\texttt{\#utf8}) and \texttt{markup} (\texttt{\#plain},
+\texttt{\#microdown}, \texttt{\#markdown}, \texttt{\#json},
+\texttt{\#html}, \texttt{\#latex}) axes translate into a
+system-prompt suffix rather than into a wire field.
+\texttt{ClaudeJsonSchemaOutputFormat} is the schema-constrained
+variant --- it wraps a \texttt{ClaudeToolInputSchema} (the same
+builder used for tool definitions, see §\ref{sec:tool-use}) and
+serializes to \texttt{\{"type": "json\_schema", "schema": \{...\}\}}.
+Construct it via \texttt{ClaudeJsonSchemaOutputFormat class>>schema:}
+directly, or via the convenience factory
+\texttt{ClaudeOutputFormat class>>jsonSchema:} which delegates to
+the same class.
+\end{sloppypar}
+
+The runnable below builds a two-field customer-order schema, hands
+it to \texttt{outputFormat:} on the request, and sends the message
+through \texttt{ClaudeClient}.  The response text then parses as a
+JSON document matching the schema:
+
+\begin{lstlisting}[language={}]
+| client schema request response |
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+"Build the JSON schema. ClaudeToolInputSchema is the same builder used
+ for tool definitions; addProperty:type:description: registers each
+ field and require: marks it as mandatory in the emitted schema."
+schema := ClaudeToolInputSchema new
+    addProperty: 'name' type: 'string' description: 'Customer name';
+    addProperty: 'amount' type: 'number' description: 'Order total';
+    require: 'name';
+    require: 'amount';
+    yourself.
+
+"Construct the request. betas: opts into the structured-outputs beta;
+ outputFormat: is the public setter that routes the format through
+ the internal ClaudeOutputConfig. The broken outputConfig: setter
+ some older snippets reference does not exist --- use outputFormat:."
+request := ClaudeMessageRequest new
+    model: ClaudeModel opus47;
+    maxTokens: 1024;
+    betas: #('structured-outputs-2025-11-13');
+    outputFormat: (ClaudeJsonSchemaOutputFormat schema: schema);
+    addUserMessage: 'Record a $42.50 coffee order for Marie Curie as JSON.';
+    yourself.
+
+"Send and parse. textContent is the assistant's JSON payload as a String;
+ STONJSON fromString: decodes it into a Dictionary whose 'name' value
+ is a String and whose 'amount' value is a Number, matching the schema."
+response := client sendMessage: request.
+STONJSON fromString: response textContent
+\end{lstlisting}
+
+The reasoning-effort hint is orthogonal to the output format.  Set
+it via \texttt{request effort: 'high'} on any request that supports
+it; the two live in the same \texttt{ClaudeOutputConfig} aggregator
+but surface as independent levers on the request.
+
+Three worked schema patterns cover most of the shapes a real
+extraction request needs.  The first is the \emph{enum-constrained
+string field}, used when a value must come from a fixed vocabulary
+--- order status, currency code, severity level.  The builder
+method \sel{addProperty:type:description:enum:} takes the same
+arguments as the unconstrained variant plus an array of allowed
+values, and the model is constrained to emit one of them.  Below,
+the \texttt{status} field is restricted to three states; the model
+cannot return ``in transit'' or any other off-vocabulary value:
+
+\begin{lstlisting}[language={}]
+"Enum-constrained string: status must be one of three fixed values."
+| schema |
+schema := ClaudeToolInputSchema new
+    addProperty: 'orderId' type: 'string' description: 'Order identifier';
+    addProperty: 'status'
+        type: 'string'
+        description: 'Order fulfilment state'
+        enum: #('pending' 'shipped' 'delivered');
+    require: 'orderId';
+    require: 'status';
+    yourself.
+\end{lstlisting}
+
+The second is the \emph{nested object shape}, used when a record
+contains a sub-record --- a customer with an address, an invoice
+with a billing party, a shipment with origin and destination.  The
+builder method \sel{addProperty:schema:} takes a property name and
+another \cls{ClaudeToolInputSchema} and registers the sub-schema as
+the property's value.  Each sub-schema is built the same way the
+top-level one is, so the pattern composes recursively to whatever
+depth the wire schema needs:
+
+\begin{lstlisting}[language={}]
+"Nested object: a Customer record with an embedded Address."
+| address customer |
+address := ClaudeToolInputSchema new
+    addProperty: 'street' type: 'string' description: 'Street address';
+    addProperty: 'city' type: 'string' description: 'City name';
+    addProperty: 'postalCode' type: 'string' description: 'Postal code';
+    require: 'street';
+    require: 'city';
+    yourself.
+customer := ClaudeToolInputSchema new
+    addProperty: 'name' type: 'string' description: 'Customer name';
+    addProperty: 'address' schema: address;
+    require: 'name';
+    require: 'address';
+    yourself.
+\end{lstlisting}
+
+The third is the \emph{array-of-record payload}, used when the
+response is a homogeneous list of records --- order line items, a
+slice of search results, a batch of extracted entities.  Set the
+schema's top-level \texttt{type} to \texttt{'array'} via
+\sel{type:}, then attach the per-element schema with \sel{items:}.
+The resulting wire schema is \texttt{\{type: "array", items:
+\{...\}\}} and the model emits a JSON array whose entries each
+match the inner schema:
+
+\begin{lstlisting}[language={}]
+"Array of records: a list of order line items. Each item must
+ carry sku and quantity; price is optional so back-orderable lines
+ can be quoted later without failing schema validation."
+| lineItem orderLines |
+lineItem := ClaudeToolInputSchema new
+    addProperty: 'sku' type: 'string' description: 'Stock keeping unit';
+    addProperty: 'quantity' type: 'integer' description: 'Units ordered';
+    addProperty: 'price' type: 'number' description: 'Unit price (optional for back-orderable lines)';
+    require: 'sku';
+    require: 'quantity';
+    yourself.
+orderLines := ClaudeToolInputSchema new
+    type: 'array';
+    items: lineItem;
+    yourself.
+\end{lstlisting}
+
+\begin{sloppypar}
+The example illustrates the \sel{require:} versus optional
+distinction: a property registered with
+\sel{addProperty:type:description:} appears in the schema's
+\texttt{properties} map, but only properties named via
+\sel{require:} are listed in the wire schema's \texttt{required}
+array.  The model is free to omit any property not in that array
+--- here, \texttt{price} can be absent on a back-orderable line
+item without violating the schema.
+\end{sloppypar}
+
+\begin{sloppypar}
+For arbitrary JSON-Schema keywords the builder methods do not
+cover --- \texttt{anyOf} and \texttt{oneOf} union types, format
+validators, length constraints, regex patterns ---
+\sel{schemaField:put:} stores the keyword on the schema's
+\texttt{extraFields} dictionary so it round-trips through
+\sel{asJson}.  The setter is selective: the four keys the schema
+already models as typed state --- \texttt{type}, \texttt{description},
+\texttt{properties}, \texttt{required} --- are routed through their
+dedicated setters (\sel{type:}, \sel{description:}, \sel{properties:},
+\sel{required:}) so internal state stays consistent; every other
+keyword lands in \texttt{extraFields} verbatim.  This is
+\cls{ClaudeToolInputSchema}'s escape hatch for the full JSON-Schema
+surface: anything the schema does not model as a typed builder method
+can be added by name.  For example, \texttt{schema schemaField: 'oneOf'
+put: \{ stringSchema asJson. numberSchema asJson \}} attaches a
+discriminated union as a top-level keyword, and the wire payload
+carries it through unchanged.
+\end{sloppypar}
+
+\begin{sloppypar}
+For where the request parameter fits on the Messages API payload
+see §\ref{sec:messages}; for the shared
+\texttt{ClaudeToolInputSchema} used in tool definitions see
+§\ref{sec:tool-use}.
+\end{sloppypar}
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/docs/build-with-claude/structured-outputs}.}}
+\end{sloppypar}
+
+\section{Token Counting (Feature Guide)}
+\label{sec:token-counting}
+
+Token counting before you send a request is a planning surface,
+not an API surface.  This section is the feature-guide companion
+to §\ref{sec:count-tokens} Count Tokens: §\ref{sec:count-tokens}
+documents the \texttt{countTokens:} selector and its response
+shape, while this section covers the \emph{why} --- pre-flight cost
+quoting, UX guardrails that warn the user before a long turn
+overruns the model's input cap, context-window selection when
+deciding between a 200K-token model and a 1M-token model, and
+batch-job gating where skipping a request that would exceed a
+quota is cheaper than letting it fail at send time.  The same
+count the billing path will meter is available before the request
+leaves the client, so the application can price, gate, and size
+the turn in one pre-flight call.
+
+\begin{sloppypar}
+To estimate tokens in an application the caller builds the
+\texttt{ClaudeMessageRequest} the same way \texttt{sendMessage:}
+takes one, hands it to \texttt{countTokens:}, and reads
+\texttt{inputTokens} off the returned
+\texttt{ClaudeMessageTokensCount}.  For the runnable call and the
+precise response shape see §\ref{sec:count-tokens}; the API surface
+is reference material and lives there rather than being duplicated
+here.  The worksheet below uses the same call shape as the
+§\ref{sec:count-tokens} example to drive a four-step cost-quoting
+flow.
+\end{sloppypar}
+
+The first sizing decision is which context window the request needs.
+Three families ship today: 200K is the universal baseline; 500K is
+the production-tier window on \cls{ClaudeModel} \sel{opus47} and
+\sel{opus46}; 1M is the long-context window on Sonnet 4.6, Opus 4.6,
+and Opus 4.7 (which include it at standard pricing without a beta
+flag, per Anthropic's pricing page) and on Sonnet 4.5 (which gates
+it behind the \texttt{context-1m-2025-08-07} beta).  The table below
+maps each window to the model families the SDK ships typed
+\cls{ClaudeModel} accessors for, and the beta header (if any) the
+request must carry --- callers reach the beta string through the
+typed catalog \texttt{ClaudeBetaHeader context1m}, which returns
+\texttt{'context-1m-2025-08-07'} (see §\ref{sec:beta-headers}).
+Each row lists the model families whose maximum input window reaches
+the row's size, and the beta column names the only gate the request
+must clear --- the 1M opt-in for Sonnet 4.5.  Larger-cap families
+appear in smaller-cap rows too because a 1M-capable model still
+serves any request that fits a smaller window; the SDK exposes no
+per-request knob to select a window below a model's maximum:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lp{6.0cm}p{3.6cm}@{}}
+\toprule
+\textbf{Window} & \textbf{Model families} & \textbf{Beta required} \\
+\midrule
+200K & Sonnet 4.5, Sonnet 4.6, Opus 4.x, Haiku 3.5, Haiku 4.5 & none \\
+500K & Opus 4.6, Opus 4.7 & none \\
+1M   & Sonnet 4.6, Opus 4.6, Opus 4.7 & none (standard pricing) \\
+1M   & Sonnet 4.5 & \texttt{context-1m-2025-08-07} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The second decision is what each input token will cost.  Anthropic
+publishes per-model rates per million tokens (MTok) on its pricing
+page; the figures below are base input and output rates retrieved
+from \url{https://docs.claude.com/en/docs/about-claude/pricing} on
+2026-04-22.  Cache-write and cache-hit pricing is a separate axis
+covered in §\ref{sec:prompt-caching}.  Callers should re-check the
+console before quoting --- Anthropic adjusts rates and the table
+below is a snapshot, not a contract:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Model} & \textbf{Input \$/MTok} & \textbf{Output \$/MTok} \\
+\midrule
+Haiku 3.5  & \$0.80 & \$4.00 \\
+Haiku 4.5  & \$1.00 & \$5.00 \\
+Sonnet 4.5 & \$3.00 & \$15.00 \\
+Sonnet 4.6 & \$3.00 & \$15.00 \\
+Opus 4.6   & \$5.00 & \$25.00 \\
+Opus 4.7   & \$5.00 & \$25.00 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The pre-flight cost quote runs in four steps.  First, build the
+\cls{ClaudeMessageRequest} the way \sel{sendMessage:} takes one ---
+same model, same conversation, same system prompt.  Second, hand it
+to \sel{countTokens:} on the client; the call returns a
+\cls{ClaudeMessageTokensCount} carrying the single
+\sel{inputTokens} field, the same value the billing path will meter
+when the request is sent.  Third, multiply that count by the model's
+per-million input rate from the table above; output cost is bounded
+by \texttt{maxTokens}, so a worst-case ceiling multiplies it by the
+output rate.  Fourth, surface the figure in the UI before the
+caller commits.  The runnable below quotes a Sonnet 4.6 turn with
+4096 max output tokens; the call shape mirrors the
+§\ref{sec:count-tokens} runnable:
+
+\begin{lstlisting}[language={},title={Pre-flight cost quote}]
+| client request count inputRate outputRate inputCost ceiling |
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+"Step 1: build the request the same way sendMessage: takes one."
+request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 4096;
+    addUserMessage: 'Summarise the attached transcript in three bullet points.';
+    yourself.
+
+"Step 2: count input tokens; same shape as the section 6 runnable."
+count := client countTokens: request.
+count inputTokens  "=> Integer, e.g. 12384"
+
+"Step 3: multiply by per-model rates from the published pricing table."
+inputRate := 3.00.   "Sonnet 4.6 input: $3.00 / MTok (retrieved 2026-04-22)"
+outputRate := 15.00. "Sonnet 4.6 output: $15.00 / MTok"
+inputCost := count inputTokens * inputRate / 1000000.
+ceiling := inputCost + (request maxTokens * outputRate / 1000000).
+
+"Step 4: surface the quote in the UI."
+String streamContents: [ :s |
+    s nextPutAll: 'Input cost: $';
+      nextPutAll: (inputCost printShowingDecimalPlaces: 4);
+      nextPutAll: ' (worst case with maxTokens output: $';
+      nextPutAll: (ceiling printShowingDecimalPlaces: 4);
+      nextPutAll: ')' ]
+\end{lstlisting}
+
+Two tactics extend the same flow.  Batch jobs gate at step 2: if
+\sel{inputTokens} exceeds the per-job quota the orchestrator skips
+the send entirely, paying nothing instead of a 400 round-trip.  UX
+guardrails fire between steps 2 and 4: if the count is within 90\%
+of the chosen model's context window, the application warns the
+user before committing rather than after the model truncates.  Both
+tactics use the same \sel{countTokens:} call --- the planning surface
+is one endpoint, the policy is application-side.
+
+For the \texttt{countTokens:} API reference and the runnable
+example see §\ref{sec:count-tokens}; for the beta-header mechanism
+the 1M context-window beta uses see §\ref{sec:api-versions}; for
+the prompt-caching pricing axis see §\ref{sec:prompt-caching}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/docs/build-with-claude/token-counting}.}}
+\end{sloppypar}
+
+\section{Batch Processing}
+\label{sec:batch-processing}
+
+Batch processing is the feature-guide companion to §\ref{sec:batches}
+Batches API: §\ref{sec:batches} catalogues the six operations
+(create, retrieve, retrieve results, list, cancel, delete) that
+would land once the surface ships, while this section covers the
+\emph{why} --- overnight evaluation runs against large question
+banks, bulk classification jobs over warehouse exports,
+model-versus-model A/B comparisons over fixed test sets, and
+retrospective backfills where days of historical traffic replay
+through a new prompt.  Applications reach for the Batches API
+when the workload tolerates up to 24 hours of completion latency
+in exchange for the discounted batch service tier, which prices
+per-token consumption below the interactive \texttt{auto} and
+\texttt{standard\_only} tiers.  The batch tier is itself not a
+\texttt{service\_tier} request-field value (see
+§\ref{sec:service-tiers}); it is intrinsic to the batch endpoint
+and applies to every request inside the job automatically.
+
+The Pharo SDK does not implement the Batches API today.  See
+§\ref{sec:batches} for the planned surface and the implementation
+shape the Pharo layer would take when the feature lands --- a typed
+request/response layer in \texttt{Claude-Messaging-Types},
+\texttt{ClaudeClient} selectors for the six operations, and a
+streaming reader for the results download so jobs with 100\,000
+per-request results do not materialize in full in VM memory.
+§\ref{sec:scope} lists the Batches API among the v2 surfaces
+deferred beyond the v1 release.
+
+This section is reference material; no runnable example applies.
+
+For the API inventory and the planned implementation shape see
+§\ref{sec:batches}; for the distinction between the batch endpoint
+and the per-request \texttt{service\_tier} field see
+§\ref{sec:service-tiers}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Not yet implemented}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/docs/build-with-claude/batch-processing}.}}
+\end{sloppypar}
+
+
+\part{Agents and Tools}
+
+\section{Tool Use}
+\label{sec:tool-use}
+
+Tool use turns the Messages API into a two-way conversation between
+Claude and application code.  The application declares one or more
+tools on the request --- each one a name, a prose description, and a
+JSON Schema for its inputs.  When Claude decides it needs the tool,
+it returns a \texttt{ClaudeToolUseBlock} in the response content;
+the caller runs whatever the tool does, wraps the answer in a
+\texttt{ClaudeToolResultBlock}, appends it to the message history,
+and sends again.  Claude integrates the result and continues.  The
+loop is what powers agentic applications: database lookups, API
+calls, file reads, shell commands, anything the model can't do on
+its own.
+
+The messaging layer ships the primitives for building one turn of
+that loop.  A tool is a \texttt{ClaudeTool} --- three slots (name,
+description, input schema), plus an optional \texttt{cacheControl}
+marker for caching tool definitions across requests
+(\S\ref{sec:prompt-caching}).  The input schema is a
+\texttt{ClaudeToolInputSchema}, a builder over the JSON Schema
+shape the Messages API expects: type defaults to \texttt{'object'},
+a \texttt{properties} dictionary holds the parameters,
+\texttt{required} lists the mandatory keys.  A tool is attached to a
+request via \texttt{ClaudeMessageRequest>>tools:}, which takes a
+collection.  When Claude uses the tool, the matching content block
+in the response answers \texttt{isToolUseBlock} with \texttt{true}
+and exposes \texttt{name} (the tool it picked) and \texttt{input}
+(the arguments it supplies as a Dictionary).  The next turn replies
+with a \texttt{ClaudeToolResultBlock} whose \texttt{toolUseId} links
+back to the block Claude emitted.
+
+The example below shows one turn end-to-end: declare a
+\texttt{get\_weather} tool with a single \texttt{city} string
+property, attach it to a request, send, and dispatch on the
+response content.  The full round-trip loop --- detect the
+\texttt{tool\_use} block, run the tool locally, append a
+\texttt{tool\_result} block, send again, repeat until Claude stops
+requesting tools --- lives in the Claude Agent SDK via
+\texttt{ClaudeExchange}.  This section shows only the messaging
+primitives; \texttt{ClaudeExchange} is specified in the
+\emph{Claude Agent SDK Specification}.
+
+\begin{lstlisting}[language={}]
+| client schema tool request response |
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+"Build a JSON Schema with one string property."
+schema := ClaudeToolInputSchema new
+    addProperty: 'city' type: 'string' description: 'City name';
+    yourself.
+
+"Wrap name, description, and schema in a ClaudeTool."
+tool := ClaudeTool
+    name: 'get_weather'
+    description: 'Get current weather for a city'
+    inputSchema: schema.
+
+"Attach the tool to a request via tools: (takes a collection)."
+request := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 1024;
+    tools: (Array with: tool);
+    addUserMessage: 'What is the weather in Paris?';
+    yourself.
+
+"Send. Claude may answer with a ClaudeToolUseBlock in the response content."
+response := client sendMessage: request.
+response content do: [ :block |
+    block isToolUseBlock ifTrue: [
+        "block name   => 'get_weather' "
+        "block input  => a Dictionary('city'->'Paris' ) "
+        Transcript show: 'Call ', block name, ' with ', block input printString; cr ] ]
+\end{lstlisting}
+
+The snippet above was run against a live Pharo image.  Constructing
+\texttt{tool} yields \texttt{'get\_weather'} as its \texttt{name};
+attaching it via \texttt{tools:} produces a serialized request
+whose \texttt{tools} array has one entry; a synthesized
+\texttt{ClaudeToolUseBlock} answers \texttt{isToolUseBlock} with
+\texttt{true} and round-trips its \texttt{name} and \texttt{input}
+slots, with \texttt{input} printing as a Pharo Dictionary
+(\texttt{\#(true 'get\_weather' 'a Dictionary(''city''->''Paris'' )')}).
+
+Phase 2 adds the tool-choice modes (\texttt{any},
+\texttt{required}, \texttt{tool}),
+\texttt{disableParallelToolUse}, fine-grained tool-input
+streaming, and the token-efficient-tools beta identifier.  The
+messaging primitives above do not change; the request-shaping
+setters land on \texttt{ClaudeMessageRequest} and
+\texttt{ClaudeRequestOptions}.
+
+For the Anthropic-hosted tool siblings see \S\ref{sec:server-tools};
+for external tools bridged through Anthropic see
+\S\ref{sec:mcp-connector}; for the request/response shape the tools
+ride on see \S\ref{sec:messages}; for thinking blocks that can
+interleave with tool-use turns see \S\ref{sec:thinking}; the full
+tool-use loop is specified in the \emph{Claude Agent SDK
+Specification} via \texttt{ClaudeExchange}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview}.\quad
+Python SDK peer:
+\url{https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview}.}}
+\end{sloppypar}
+
+\section{Server Tools}
+\label{sec:server-tools}
+
+Server tools flip the execution boundary.  Instead of Claude
+asking the application to run a tool and waiting for the answer,
+Anthropic hosts the tool and runs it directly during message
+generation.  The application declares which hosted tools are
+allowed on the request; the API invokes them as needed and returns
+the results inline with the rest of the response content.  No
+round-trip through application code is needed for web search, web
+fetch, sandboxed code execution, sandboxed bash, a server-side
+text editor, persistent memory, or BM25/regex tool search.
+Server tools are what you reach for when you want Claude to
+\emph{do} something the API can perform on your behalf, rather
+than delegate the work back to your stack.
+
+\begin{sloppypar}
+The Smalltalk SDK models each hosted tool as a concrete subclass
+of \texttt{ClaudeServerTool} in \pkg{Claude-Messaging-Tools}.
+Each class carries the wire-format name, defaults for any
+tool-specific parameters, and an \texttt{asJson} method that
+serializes the tool declaration Anthropic expects in the request's
+\texttt{tools} array.  The hierarchy is small and flat:
+\end{sloppypar}
+
+\begin{center}
+\begin{tabular}{@{}llp{5cm}@{}}
+\toprule
+\textbf{Class} & \textbf{Tool Name} & \textbf{Purpose} \\
+\midrule
+\texttt{ClaudeServerTool}          & (abstract)                  & Base class \\
+\texttt{ClaudeWebSearchTool}       & \texttt{web\_search}        & Web search \\
+\texttt{ClaudeWebFetchTool}        & \texttt{web\_fetch}         & Fetch URL content \\
+\texttt{ClaudeCodeExecutionTool}   & \texttt{code\_execution}    & Sandboxed code execution \\
+\texttt{ClaudeBashTool}            & \texttt{bash}               & Sandboxed bash \\
+\texttt{ClaudeTextEditorTool}      & \texttt{text\_editor}       & Server-side text editor \\
+\texttt{ClaudeMemoryTool}          & \texttt{memory}             & Persistent memory \\
+\texttt{ClaudeToolSearchBm25Tool}  & \texttt{tool\_search\_bm25} & BM25 tool search \\
+\texttt{ClaudeToolSearchRegexTool} & \texttt{tool\_search\_regex} & Regex tool search \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{sloppypar}
+\texttt{ClaudeMessageRequest} gains an extension method per tool
+in \pkg{Claude-Messaging-Tools} --- \texttt{addWebSearch},
+\texttt{addWebFetch}, \texttt{addCodeExecution}, \texttt{addBash},
+\texttt{addTextEditor}, \texttt{addMemory},
+\texttt{addToolSearchBm25}, \texttt{addToolSearchRegex} --- each
+one a one-line wrapper that instantiates the matching subclass
+with defaults and appends it to the request's tool list.
+Because the extension lives in the tools package, the core
+\texttt{Claude-Messaging-Types} package stays free of dependencies
+on the server-tool hierarchy; loading
+\pkg{Claude-Messaging-Tools} into the image is what lights the
+convenience methods up.  Server tools can coexist with
+client-defined tools (\S\ref{sec:tool-use}) on the same request:
+both land in the same \texttt{tools} array, and Anthropic
+dispatches to the right executor by tool name.
+\end{sloppypar}
+
+\begin{lstlisting}[language={}]
+| client params response |
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+params := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 1024;
+    addUserMessage: 'Summarise today''s headline at anthropic.com';
+    yourself.
+
+"Four one-liners, each appending a ClaudeServerTool subclass to the tools array."
+params addWebSearch.
+params addWebFetch.
+params addCodeExecution.
+params addBash.
+
+"The request now carries four hosted-tool declarations."
+(params asJson at: 'tools') size.  "=> 4"
+
+"Send. Anthropic runs the tools server-side and returns their results inline."
+response := client sendMessage: params.
+\end{lstlisting}
+
+\begin{sloppypar}
+Reference docs for each hosted tool live under
+\url{https://docs.claude.com/en/docs/agents-and-tools/tool-use/}
+(\texttt{web-search-tool}, \texttt{web-fetch-tool},
+\texttt{code-execution-tool}, \texttt{bash-tool},
+\texttt{text-editor-tool}, plus Memory and Tool Search
+sub-pages).  Tool-specific betas --- when Anthropic gates a new
+server tool behind an opt-in --- ride on \texttt{betas:} in the
+request the same way every other beta does
+(\S\ref{sec:beta-headers}).
+\end{sloppypar}
+
+Phase 2 evaluates Computer Use
+(\texttt{computer\_20250124}) and Anthropic's programmatic
+tool-calling shape; neither ships in the current release.
+
+For the client-defined tool sibling see \S\ref{sec:tool-use}; for
+external tools bridged through an MCP server see
+\S\ref{sec:mcp-connector}; for the opt-in header mechanism see
+\S\ref{sec:beta-headers}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/docs/agents-and-tools/tool-use/}.\quad
+Python SDK peer:
+\url{https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview}.}}
+\end{sloppypar}
+
+\section{MCP Connector}
+\label{sec:mcp-connector}
+
+The MCP connector beta lets the SDK point Claude at a Model
+Context Protocol server hosted somewhere on the public internet,
+and have Anthropic's infrastructure --- not the application's
+runtime --- connect out to that server during message generation.
+The caller lists one or more server URLs on the request under
+\texttt{mcpServers:}, opts into the
+\texttt{mcp-client-2025-04-04} beta via \texttt{betas:}, and
+sends.  Anthropic plays the role of MCP client; when the model
+invokes a tool on one of the listed servers, Anthropic dispatches
+the call, collects the result, and folds both the invocation and
+the result into the response stream as new content-block types
+the SDK dispatches on.  The MCP server itself runs externally, on
+the customer's infrastructure or a third-party host.
+
+Three features share the MCP acronym in this codebase, and only
+one of them is this connector.  \emph{This} connector is the
+SDK-side feature where Claude consumes MCP tools through
+Anthropic; exposing the Pharo image \emph{as} an MCP server for
+another MCP host to call is a separate, post-v1.0 feature; the
+local MCP runtime Claude Code uses to back slash commands like
+\texttt{/find} or \texttt{/who} is a different surface entirely
+(biff, quarry, lux plugins, not an SDK concern).
+
+\begin{sloppypar}
+The Smalltalk surface lives in two packages.  Request-side class
+definitions are in \pkg{Claude-Messaging-MCP}; the response-side
+content blocks live in \pkg{Claude-Messaging-Types} alongside the
+other \texttt{ClaudeContentBlock} subclasses, registered in the
+name-keyed \texttt{TypeRegistry} under \texttt{mcp\_tool\_use}
+and \texttt{mcp\_tool\_result}:
+\end{sloppypar}
+
+\begin{center}
+\begin{tabular}{@{}lp{6.5cm}@{}}
+\toprule
+\textbf{Class} & \textbf{Role} \\
+\midrule
+\texttt{ClaudeMCPServerDefinition}   & Request-side server entry:
+  name, URL, optional auth token, optional tool config \\
+\texttt{ClaudeMCPToolConfiguration}  & Per-server tool config
+  (enabled flag, allow-listed tool names) \\
+\texttt{ClaudeMCPToolUseBlock}       & Response block when Claude
+  invokes a tool on the MCP server \\
+\texttt{ClaudeMCPToolResultBlock}    & Response block carrying the
+  result (String or \texttt{OrderedCollection} of
+  \texttt{ClaudeTextBlock}) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The \texttt{ClaudeMCPToolResultBlock} \texttt{content} slot is
+deliberately polymorphic: a wire \texttt{string} stays a
+\texttt{String}; a wire array becomes an
+\texttt{OrderedCollection} of \texttt{ClaudeTextBlock}.
+\texttt{asJson} dispatches on the runtime shape so a
+\texttt{fromJson:/asJson} round-trip preserves wire fidelity in
+both directions.  Both \texttt{ClaudeMCPServerDefinition} and
+\texttt{ClaudeMCPToolConfiguration} carry an \texttt{extraFields}
+slot for forward-compat preservation of unknown wire keys,
+mirroring the strategy \texttt{ClaudeContentBlock} uses for
+unrecognized block types.
+
+The SDK does not auto-inject the MCP beta header when
+\texttt{mcpServers:} is set; the caller opts in explicitly via
+\texttt{betas: \#('mcp-client-2025-04-04')}.  Explicit opt-in
+matches the shape of the Files API, PDF document blocks, and the
+\texttt{output-128k} beta --- the SDK never activates a beta on
+the caller's behalf.  Two required-field guards fail fast before
+the request leaves the client: \texttt{asJson} on
+\texttt{ClaudeMCPServerDefinition} raises an \texttt{Error} (via
+\texttt{self error:}) when \texttt{name} or \texttt{url} is
+\texttt{nil}, and on \texttt{ClaudeMCPToolResultBlock} when
+\texttt{toolUseId} is \texttt{nil}.  Both are required on the
+wire; failing in-image is preferable to a \texttt{400} round-trip.
+
+\begin{lstlisting}[language={}]
+| client server params response |
+client := ClaudeClient apiKey: 'sk-ant-...'.
+
+"Build a server entry with name, URL, and optional bearer token."
+server := ClaudeMCPServerDefinition new
+    name: 'example';
+    url: 'https://mcp.example.com/sse';
+    authorizationToken: 'token-123';
+    yourself.
+
+"Opt into the MCP beta and attach the server list on the request."
+params := ClaudeMessageRequest new
+    model: ClaudeModel sonnet46;
+    maxTokens: 1024;
+    betas: #('mcp-client-2025-04-04');
+    mcpServers: (Array with: server);
+    addUserMessage: 'List my open issues';
+    yourself.
+
+"Send. Anthropic connects out to the MCP server when the model needs it."
+response := client sendMessage: params.
+
+"The response content may carry new block types; dispatch on the predicates."
+response content do: [ :block |
+    block isMCPToolUseBlock ifTrue: [
+        "block serverName, block name, block input carry the invocation" ].
+    block isMCPToolResultBlock ifTrue: [
+        "block toolUseId links back; block content is String or
+         OrderedCollection of ClaudeTextBlock" ] ]
+\end{lstlisting}
+
+For the client-defined tool sibling see \S\ref{sec:tool-use}; for
+Anthropic-hosted tools where the API executes the tool directly
+see \S\ref{sec:server-tools}; for the opt-in header mechanism see
+\S\ref{sec:beta-headers}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/docs/agents-and-tools/mcp-connector}.}}
+\end{sloppypar}
+
+\section{Agent Skills}
+\label{sec:agent-skills}
+
+An Agent Skill is a portable bundle of instructions and
+supporting scripts that Anthropic loads into a code-execution
+container on Claude's behalf during a Messages request.  Each
+skill is a directory rooted at a \texttt{SKILL.md}, uploaded as a
+versioned artifact through the Skills API; a request that
+references the skill id inside its container spec gets the files
+unpacked into the container's filesystem and made visible to the
+model.  Anthropic ships a pre-built catalog --- \texttt{pptx},
+\texttt{xlsx}, \texttt{docx}, \texttt{pdf} --- for document
+generation, and customers can publish their own skills for any
+repeatable capability they want Claude to reach for on the next
+turn.  The pre-built catalog is server-side: the SDK does not
+enumerate the pre-built names locally, it just loads any skill
+by id into the request's container.
+
+Skills sit alongside \S\ref{sec:tool-use} and
+\S\ref{sec:server-tools} as a third kind of capability surface, and
+the choice between them comes down to what the capability \emph{is}.
+A \textbf{tool} is a single-purpose callable the model invokes
+mid-turn through the tool-use protocol --- the model emits a
+\texttt{tool\_use} block naming the tool and its arguments, the
+caller executes the tool, and the model receives a
+\texttt{tool\_result} on the next turn.  A \textbf{skill} is a
+versioned bundle of prose and supporting scripts that Anthropic
+unpacks into the request's code-execution container; the model loads
+the bundle's \texttt{SKILL.md} and uses the included files however
+the task demands, with no per-step round-trip back to the caller.
+\textbf{Retrieval-augmented generation} (RAG) is a third neighbour
+that supplies reference material the model reads but does not
+execute --- a similarity search over a corpus surfaces the documents
+most relevant to the current turn, and those documents land in the
+context window as plain text.  Tools execute, skills are loaded and
+used, RAG retrieves and reads.
+
+The decision between the three follows the shape of the request.
+``Query the weather API for Berlin'' is a tool: a single call with
+typed arguments and a typed return value.  ``Generate a PowerPoint
+from these bullet points'' is a skill --- Anthropic's pre-built
+\texttt{pptx} catalog entry (see §\ref{sec:skills} for the catalog
+shape) bundles the templates and rendering scripts the model needs,
+and the call to the model carries no per-slide tool round-trips.
+``Find the three most similar past incidents in our postmortem
+archive'' is RAG: the search runs against a vector index, the top-k
+documents enter the context, and the model reasons over them.
+``Compile a quarterly sales report by region'' is again a skill ---
+the \texttt{pptx} and \texttt{xlsx} catalog entries compose, the
+model loads both into one container, and the output is a workbook
+plus a slide deck the model assembles in one turn.
+
+Skills, tools, and RAG compose freely.  A skill's container can
+call tools the request also declares --- the model can reach for the
+weather tool from inside a script the \texttt{pptx} skill loaded.
+A tool the caller authors can synthesize skill output --- the tool's
+implementation can post-process a workbook the model just built.
+And RAG complements both: the retrieved documents land in the prompt
+that drives the skill's container, or supply the context a tool's
+arguments encode.  The three layers stack rather than compete.
+
+This section is the feature-guide entry point for skills; the
+mechanics --- upload, list, version, delete, container loading,
+page-token pagination, multipart streaming, skill specs in
+\texttt{ClaudeContainerParams} and \texttt{ClaudeSkillSpec} ---
+are specified in \S\ref{sec:skills}.  This section is reference
+material; no runnable example applies.  A complete skill-upload
+example lives in \S\ref{sec:skills}.
+
+For the Skills API mechanics see \S\ref{sec:skills}; for tools
+as an alternate capability shape see \S\ref{sec:tool-use}.
+
+\medskip
+\begin{sloppypar}
+\noindent{\small\textsf{Status: \emph{Available}.\quad
+Anthropic docs: \url{https://docs.claude.com/en/docs/agents-and-tools/agent-skills/overview}.}}
+\end{sloppypar}
+
+\end{document}

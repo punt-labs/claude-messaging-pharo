@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write  # scoped to this job only — needed for gh release create
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0  # full history required: gh release create reads tag history
+
+      - name: Install pdflatex
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends texlive-latex-base texlive-latex-extra texlive-fonts-recommended
+
+      - name: Build PDFs (two-pass each)
+        run: |
+          cd docs/specifications
+          pdflatex -interaction=nonstopmode messaging-specification.tex
+          pdflatex -interaction=nonstopmode messaging-specification.tex
+          pdflatex -interaction=nonstopmode messaging-specification-pharo-notes.tex
+          pdflatex -interaction=nonstopmode messaging-specification-pharo-notes.tex
+
+      - name: Create GitHub Release with PDFs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          gh release create "${VERSION}" \
+            --title "Claude Messaging SDK for Pharo ${VERSION}" \
+            --notes-file CHANGELOG.md \
+            docs/specifications/messaging-specification.pdf \
+            docs/specifications/messaging-specification-pharo-notes.pdf

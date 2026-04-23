@@ -1,0 +1,581 @@
+%
+% messaging-specification-pharo-notes.tex
+% Compile: pdflatex messaging-specification-pharo-notes.tex
+%
+
+\documentclass[a4paper,10pt,fleqn]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{amsmath}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue!80!black},
+  commentstyle=\color{green!50!black},
+  stringstyle=\color{red!60!black},
+  breaklines=true,
+  frame=single,
+  framerule=0.3pt,
+  rulecolor=\color{gray!50},
+  backgroundcolor=\color{gray!5},
+  columns=fullflexible,
+}
+
+\newcommand{\cls}[1]{\texttt{#1}}
+\newcommand{\sel}[1]{\texttt{\##1}}
+\newcommand{\pkg}[1]{\texttt{#1}}
+\newcommand{\goref}[1]{\textsf{\small [Go: #1]}}
+
+\begin{document}
+
+\title{Claude Messaging SDK for Pharo:\\Pharo-Specific Implementation Notes}
+\author{Punt Labs}
+\date{April 2026 --- v0.3.0-dev}
+\hypersetup{
+  pdftitle={Claude Messaging SDK for Pharo: Pharo-Specific Implementation Notes},
+  pdfauthor={Punt Labs},
+  pdfsubject={Messaging SDK Pharo-Specific Notes},
+  pdfcreator={pdflatex}
+}
+\maketitle
+
+\tableofcontents
+\newpage
+
+\subsection*{About this Document}
+
+Pharo-specific notes without an Anthropic counterpart.  Companion
+to \emph{messaging-specification.tex}.
+
+\section{Relationship to Go SDK}
+
+The Go SDK (\texttt{anthropic-sdk-go}) is code-generated from Anthropic's
+OpenAPI specification via Stainless.  This produces 232 types in
+\texttt{message.go} alone, most of which are mechanical variants of a
+smaller set of core concepts.
+
+The Smalltalk SDK does not replicate this generated structure.  Instead, it
+distills the Go types into a smaller class hierarchy organized by role,
+using Smalltalk's polymorphic dispatch and class hierarchy in place of Go's
+discriminated unions and struct embedding.
+
+\section{Go to Smalltalk Mapping}
+
+The Go SDK uses flat structs with discriminator fields and \texttt{AsAny()}
+type switches for polymorphism.  Smalltalk replaces this with a class
+hierarchy and polymorphic message dispatch.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lYY@{}}
+\toprule
+\textbf{Go Pattern} & \textbf{Smalltalk Equivalent} & \textbf{Example} \\
+\midrule
+Struct with fields  & Class with instance variables    &
+  \cls{ClaudeMessage} \\
+Discriminated union (\texttt{AsAny()}) & Abstract class + subclasses &
+  \cls{ClaudeContentBlock} hierarchy \\
+\texttt{param.Opt[T]} (optional) & \texttt{nil} or value &
+  Standard Smalltalk \\
+\texttt{json.RawMessage} & Raw JSON string &
+  String or Dictionary \\
+Param vs Response types & Single class (Smalltalk is dynamic) &
+  \cls{ClaudeMessage} for both \\
+Constants (\texttt{type X string}) & Class-side methods returning symbols &
+  \cls{ClaudeModel class>>sonnet} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{JSON Key Mapping}
+
+Wire keys are snake\_case strings (\texttt{max\_tokens}).  Smalltalk instance
+variables are camelCase (\texttt{maxTokens}).  Every type class defines a
+class-side method \sel{jsonKeyMap} returning a Dictionary mapping instance
+variable names (Symbols) to wire key strings:
+
+\begin{lstlisting}[language={},title={JSON key mapping}]
+ClaudeMessage class>>jsonKeyMap
+    ^ {
+        #stopReason -> 'stop_reason'.
+        #stopSequence -> 'stop_sequence'.
+        #inputTokens -> 'input_tokens'.
+    } asDictionary
+\end{lstlisting}
+
+The \sel{asJson} method iterates instance variables, looks up the wire key
+from the map (defaulting to the variable name if absent), and omits nil
+values.  The class-side \sel{fromJson:} reverses the map to populate
+instance variables from the parsed Dictionary.
+
+\section{Helper Constructors}
+
+Class-side factory methods on content block classes provide concise construction:
+
+\begin{lstlisting}[language={},title={Helper constructors}]
+ClaudeTextBlock text: 'Hello, world'.
+ClaudeImageBlock base64: encodedData mediaType: 'image/png'.
+ClaudeToolUseBlock id: 'tu_123' name: 'get_weather' input: inputDict.
+ClaudeToolResultBlock toolUseId: 'tu_123' content: 'Sunny, 22C'.
+ClaudeToolResultBlock toolUseId: 'tu_123' content: 'Not found' isError: true.
+ClaudeThinkingBlock thinking: 'Let me reason...' signature: 'sig...'.
+ClaudeRedactedThinkingBlock data: 'redacted-data-string'.
+ClaudeDocumentBlock fromBase64: 'JVBERi0xLjQ='.
+ClaudeDocumentBlock fromFileId: 'file-abc123'.
+ClaudeDocumentBlock fromText: 'Plain text document content'.
+ClaudeDocumentBlock fromUrl: 'https://example.com/doc.pdf'.
+ClaudeImageBlock fromUrl: 'https://example.com/image.png'.
+ClaudeImageBlock fromFileId: 'file-img456'.
+\end{lstlisting}
+
+\section{JSON Serialization}
+
+The Go SDK uses a custom JSON codec (\texttt{internal/apijson/}) with
+reflection-based encoder/decoder caches.  Smalltalk does not need this
+--- STONJSON handles serialization directly.
+
+\subsection{Conventions}
+
+\begin{itemize}
+  \item \textbf{Request serialization:} Each type implements \sel{asJson}
+    returning a Dictionary.  \texttt{STONJSON toString:} converts to
+    wire format.
+  \item \textbf{Response deserialization:} \texttt{STONJSON fromString:}
+    returns a Dictionary (specifically \texttt{OrderedDictionary} in
+    Pharo~12).  Each type's class-side \sel{fromJson:} constructs
+    typed objects.
+  \item \textbf{Nil omission:} \sel{asJson} omits nil-valued fields.
+    The Go SDK uses \texttt{param.Opt[T]} for this; Smalltalk uses nil
+    naturally.
+  \item \textbf{Key format:} Wire keys are snake\_case strings
+    (\texttt{max\_tokens}).  Smalltalk instance variables are camelCase
+    (\texttt{maxTokens}).  The \sel{jsonKeyMap} class-side method defines
+    the mapping (see the JSON Key Mapping section above).
+  \item \textbf{Unknown fields:} When deserializing, unknown JSON keys are
+    silently ignored.  This provides forward compatibility when the API adds
+    new fields.
+\end{itemize}
+
+\section{Pharo Threading Model (Streaming)}
+
+Pharo uses cooperative scheduling within a priority level.  \texttt{[ ... ]
+fork} spawns a \texttt{Process} (green thread) that runs cooperatively with
+other processes at the same priority.  Processes at the same priority do
+\emph{not} run in parallel --- they yield at I/O points, explicit yields,
+and semaphore waits.  Processes at different priorities are preemptive (higher
+priority preempts lower).
+
+\textbf{Rule:} streaming network I/O must run in a forked Process.
+
+\begin{lstlisting}[language={},title={Simple streaming pattern (buffered)}]
+| events sem |
+events := OrderedCollection new.
+sem := Semaphore new.
+
+[ [ client
+    streamMessage: params
+    do: [ :event | events add: event ].
+  sem signal ]
+    on: ClaudeApiError
+    do: [ :e | events add: e. sem signal ] ]
+  forkAt: Processor userBackgroundPriority
+  named: 'Claude stream'.
+
+"Consumer waits for completion, then processes all events:"
+sem wait.
+events do: [ :each |
+    each isKindOf: ClaudeApiError
+        ifTrue: [ self handleError: each ]
+        ifFalse: [ self handleEvent: each ] ]
+\end{lstlisting}
+
+The SDK provides \sel{streamMessage:do:} as a synchronous method.  The
+consumer is responsible for forking.  The SDK documents this requirement
+but does not enforce it --- forcing a fork inside the SDK would prevent
+consumers from choosing their own concurrency strategy.
+
+For incremental delivery, use the real-time mode pattern (SharedQueue +
+forked socket reader) described in the main specification's Streaming
+Messages section.
+
+\section{Porting from Go SDK}
+
+The reference implementation is Anthropic's Go SDK
+(\texttt{anthropic-sdk-go}), code-generated from the OpenAPI specification
+via Stainless.  The Go SDK produces 232 types in \texttt{message.go}
+alone --- most are mechanical variants of a smaller set of core concepts
+(param vs.\ response structs, union wrappers, JSON marshalers).
+
+The porting strategy is \emph{distillation, not transliteration}.
+Smalltalk's class hierarchy and polymorphic dispatch replace Go's flat
+structs and discriminated unions.  A single \cls{ClaudeContentBlock}
+hierarchy with 16 subclasses replaces 30+ Go \texttt{ContentBlock*}
+types.  \cls{ClaudeMessage} serves as both request parameter and
+response --- Go needs separate \texttt{Message} and
+\texttt{MessageParam} structs because the type system cannot share them.
+
+Each Go type is mapped once via the type inventory (see the Go SDK Type
+Inventory section below).  When a Go type group collapses to a single
+Smalltalk class, the mapping is recorded and the redundant Go variants
+are not ported.  This keeps the Smalltalk class count proportional to
+the number of \emph{concepts}, not the number of generated types.
+
+The reference SDK is kept at \texttt{.tmp/anthropic-sdk-go/} (gitignored)
+and consulted for every new API feature to ensure wire-format
+compatibility.
+
+\section{Postern Bootstrap}
+
+All development happens inside a live Pharo~12 image via Postern, an
+HTTP eval server running on \texttt{localhost:\$\{EVAL\_PORT:-8422\}}.
+The eval server accepts Smalltalk expressions as plain-text POST bodies
+and returns printed results.  This provides interactive class definition,
+method compilation, test execution, lint checks, and full introspection
+--- all driven from Claude Code's Bash tool or any HTTP client.
+
+The image is disposable.  \texttt{make rebuild} creates a fresh image
+from scratch, loading all source from Tonel files in \texttt{src/}.
+\texttt{make stop} kills without saving --- saving would capture socket
+state that causes errors on restore.  The source of truth is always
+Tonel on disk, committed via Iceberg (libgit2) from inside the image.
+
+Key Postern targets: \texttt{make setup} (download Pharo~12 + load
+packages), \texttt{make start} (launch with eval server),
+\texttt{make test} (run SDK test suite), \texttt{make lint} (Renraku
+lint on all classes), \texttt{make drift} (compare in-image methods
+vs.\ on-disk Tonel), \texttt{make filein} (reload Tonel into running
+image).
+
+Multiple images can run simultaneously on different ports via the
+\texttt{EVAL\_PORT} environment variable, each with its own PID file
+and log file.
+
+\section{Agent-Assisted Development}
+
+Development uses ethos mission pipelines to delegate work to specialist
+agents.  The standard pipeline has five stages: design, implement, test,
+review, document.  Each stage produces an artifact that feeds the next
+via \texttt{inputs\_from} dependency wiring.
+
+Implementation work is dispatched to a Smalltalk specialist agent (kwb)
+scoped by a mission contract that specifies the write-set (which Tonel
+files may be touched), success criteria (\texttt{make lint} clean,
+specific test classes passing, Iceberg ref sync), round budget, and
+evaluator.  Every contract is peer-reviewed by an architect agent before
+the worker sees it.
+
+The SDK's own \cls{ClaudeExchange} agent runtime is used during
+development --- the implementing agent runs inside the Pharo image via
+the eval server, compiling methods and running tests through the same
+SDK classes it is building.  This in-image dogfooding exercises
+interaction patterns that no external test harness can simulate:
+streaming under load, tool dispatch cycles, error recovery across
+conversation turns.
+
+Quality gates are layered: the worker runs per-class tests via the eval
+server, the leader runs \texttt{make lint} from CLI (which catches
+class-level Renraku rules that per-method probes miss), and local review
+agents scan the full branch diff before any PR is created.
+
+\section{Package Health}
+
+Package structure is assessed using the Ducasse/Abdeen modularization
+metrics from WCRE'11 (\emph{Package Fingerprints}).  The key metric is
+IIPU (Index of Inter-Package Usage) --- the ratio of intra-package
+references to total references.  Higher IIPU means better encapsulation.
+
+The SDK tracks IIPU across restructuring milestones.  The original flat
+\texttt{Claude-SDK-*} layout scored IIPU 0.458 (heavy cross-package
+coupling).  After the Messaging/Agent layer split and the introduction
+of \texttt{Claude-Messaging-Tools} and \texttt{Claude-Messaging-Files}
+as separate packages, IIPU rose to 0.838.  The \texttt{/package-health}
+assessment skill provides repeatable analysis.
+
+Naming discipline follows Kent Beck's Intention Revealing Selector
+pattern, scaled from methods to packages.  Package names follow the
+Pharo idiom \texttt{Family-SubFamily-Module} (e.g.,
+\texttt{Claude-Messaging-Types}, \texttt{Claude-Agent-Tools-Pharo}).
+The layered names make the dependency hierarchy explicit: everything in
+\texttt{Claude-Agent-*} depends on \texttt{Claude-Messaging-*}, never
+the reverse.  Tool names use PascalCase compound names matching Claude
+Code's convention (\texttt{BrowseClass}, \texttt{CompileMethod},
+\texttt{RunTests}).
+
+Every package name change and every new package is reviewed by an
+architect agent for consistency with the naming scheme before
+implementation begins.
+
+\section{Package Architecture}
+\label{notes:package-architecture}
+
+\subsection{Package Inventory}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lrY@{}}
+\toprule
+\textbf{Package} & \textbf{Classes} & \textbf{Responsibility} \\
+\midrule
+\pkg{Claude-Messaging-Types}      & 48 & \cls{ClaudeMessage} and decomposition
+  (turn, stop details, request context, container), content block hierarchy
+  (16 subclasses including \cls{ClaudeDocumentBlock} with source hierarchy),
+  tool types, model, usage, cache control, thinking params, sampling params,
+  request options, output format; JSON serialization; helper constructors \\
+\pkg{Claude-Messaging-Errors}    & 10 & \cls{ClaudeApiError} hierarchy (8 concrete
+  subclasses keyed on HTTP status), error factory, \cls{ClaudeInvalidRequestError} \\
+\pkg{Claude-Messaging-Streaming} &  2 & \cls{ClaudeSSEDecoder} (buffered and real-time
+  SSE parsing), \cls{ClaudeStreamingSocket} (raw TLS with chunked
+  transfer-encoding) \\
+\pkg{Claude-Messaging-Client}    &  1 & \cls{ClaudeClient} --- creation, configuration,
+  HTTP request lifecycle, options, retry logic, Files API \\
+\pkg{Claude-Messaging-Tools}     & 10 & \cls{ClaudeServerTool} hierarchy (8 concrete
+  server-side tools), name-keyed \cls{TypeRegistry} \\
+\pkg{Claude-Messaging-Files}     &  4 & \cls{ClaudeFileMetadata},
+  \cls{ClaudeFilePage}, \cls{ClaudeFileListParams},
+  \cls{ClaudeDeletedFile} \\
+\pkg{Claude-Messaging-Examples}  &  7 & Example scripts for messaging API usage \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Dependency Flow}
+
+Dependencies flow in strict layers:
+
+\begin{verbatim}
+  Messaging-Types  Messaging-Errors  Messaging-Streaming
+        |               |                |
+  Messaging-Tools  Messaging-Files       |
+        |               |                |
+        +-------+-------+-------+--------+
+                |
+          Messaging-Client
+\end{verbatim}
+
+\noindent Messaging-Client depends on Types, Errors, Streaming, Tools
+(server-side tool types), and Files (file metadata types).
+
+The Agent layer (\pkg{Claude-Agent-*}) depends on Messaging-Client and
+is specified in the \emph{Claude Agent SDK for Pharo --- Technical
+Specification}.
+
+\section{Concurrency Model}
+
+\subsection{The Go SDK is Synchronous}
+
+The Go SDK has no goroutines in its public API.  All methods are blocking.
+\texttt{http.Client} manages connection pooling internally.  The Smalltalk
+SDK mirrors this: all public methods are synchronous and blocking.
+
+\subsection{What Runs Where}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lYl@{}}
+\toprule
+\textbf{Operation} & \textbf{Blocking?} & \textbf{Safe for UI?} \\
+\midrule
+Create client              & No  & Yes \\
+Build message params       & No  & Yes \\
+\sel{sendMessage:}         & Yes (network I/O) & \textbf{No --- fork} \\
+\sel{streamMessage:do:}    & Yes (network I/O) & \textbf{No --- fork} \\
+\sel{listModels}           & Yes (network I/O) & \textbf{No --- fork} \\
+\sel{getModel:}            & Yes (network I/O) & \textbf{No --- fork} \\
+\sel{countTokens:}         & Yes (network I/O) & \textbf{No --- fork} \\
+Parse JSON response        & No  & Yes \\
+Tool handler execution     & Depends & Fork if I/O-bound \\
+Retry backoff sleep        & Yes & \textbf{No --- fork} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Safe Patterns}
+
+\begin{description}[style=nextline]
+  \item[Fork + Semaphore]
+    Fork a Process, signal a Semaphore on completion.  Consumer waits on
+    the Semaphore.  Use when the consumer needs the full result before
+    proceeding.
+
+  \item[Fork + SharedQueue]
+    Fork a Process, enqueue results into a SharedQueue.  Consumer drains
+    the queue incrementally.  Use for streaming events where partial results
+    are useful.  The consumer reads from the queue in a loop, not after
+    a semaphore wait.
+
+  \item[Fork + callback]
+    Fork a Process, call a block on each event.  The block must not touch
+    Morphic directly --- use \texttt{WorldState defer:} to schedule UI
+    updates on the UI thread.
+\end{description}
+
+\subsection{Unsafe Patterns}
+
+\begin{itemize}
+  \item Calling \sel{sendMessage:} directly from a Morphic event handler.
+  \item Calling \sel{streamMessage:do:} without forking.
+  \item Modifying Morphic submorphs from a background Process without
+    \texttt{WorldState defer:}.
+  \item Waiting on a Semaphore from a SharedQueue-based streaming pattern
+    (blocks until complete, defeating incremental delivery).
+\end{itemize}
+
+\section{Smalltalk Idioms}
+
+Kent Beck's \emph{Smalltalk Best Practice Patterns} guide the SDK design.
+
+\subsection{Composed Method (Pattern 1)}
+
+Every method does one identifiable thing.  Large methods are decomposed
+into helper messages.  The Go SDK's \texttt{ExecuteNewRequest} (80+
+lines) becomes several composed methods in Smalltalk:
+\sel{buildRequest:}, \sel{executeWithRetry:}, \sel{parseResponse:}.
+
+\subsection{Intention Revealing Selector (Pattern 2)}
+
+Method names describe \emph{what}, not \emph{how}:
+
+\begin{itemize}
+  \item \sel{sendMessage:} not \sel{postToMessagesEndpoint:}
+  \item \sel{textContent} not \sel{collectTextBlocksAndJoin}
+  \item \sel{toolUseBlocks} not \sel{selectContentBlocksOfTypeToolUse}
+\end{itemize}
+
+\subsection{Pluggable Behavior (Pattern 13)}
+
+Use blocks for extensibility:
+
+\begin{itemize}
+  \item \sel{streamMessage:do:} takes a callback block.
+  \item Tool runner handlers are blocks.
+  \item Retry policy could be a pluggable strategy block.
+\end{itemize}
+
+\subsection{Collecting Parameter (Pattern 14)}
+
+Build results incrementally.  The message accumulator is a collecting
+parameter: it receives streaming events one at a time and constructs the
+full message progressively.
+
+\subsection{Method Object (Pattern 15)}
+
+When a method gets too complex, extract it into a separate class whose
+instances represent a single execution of the algorithm.  In this SDK,
+the following are already designed as method objects (separate classes,
+not methods buried in \cls{ClaudeClient}):
+
+\begin{itemize}
+  \item \cls{ClaudeSSEDecoder} --- encapsulates SSE parsing state
+  \item \cls{ClaudeExchange} --- encapsulates the tool dispatch loop
+    with iteration count and state inspection (see the
+    \emph{Claude Agent SDK Specification})
+\end{itemize}
+
+The retry loop is part of \cls{ClaudeClient}'s request lifecycle.  If
+retry logic grows more complex (e.g., pluggable retry policies), it
+should be extracted into a \cls{ClaudeRetryPolicy} method object.
+
+\section{Go SDK Type Inventory (Condensed)}
+\label{notes:type-inventory}
+
+The Go SDK's \texttt{message.go} contains 232 types.  Most are generated
+variants.  The following table maps every Go type group to the Smalltalk
+class that replaces it.
+
+\begin{center}
+\small
+\begin{longtable}{@{}llp{4.5cm}@{}}
+\toprule
+\textbf{Go Type Group} & \textbf{Smalltalk Class} & \textbf{Notes} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Go Type Group} & \textbf{Smalltalk Class} & \textbf{Notes} \\
+\midrule
+\endhead
+Message, MessageJSON       & \cls{ClaudeMessage}        & Response + param;
+  includes \texttt{type} field \\
+MessageParam               & via \sel{asParam}          & Converter method \\
+MessageNewParams           & \cls{ClaudeMessageRequest}  & Request builder \\
+ContentBlockUnion (12+ variants) & \cls{ClaudeContentBlock} subclasses &
+  Polymorphic hierarchy \\
+ContentBlockParamUnion     & Same classes, \sel{asJson}  & Shared \\
+TextBlock (with Citations) & \cls{ClaudeTextBlock}      & \texttt{text} +
+  \texttt{citations} \\
+ThinkingBlock              & \cls{ClaudeThinkingBlock}  & \texttt{thinking},
+  \texttt{signature} \\
+RedactedThinkingBlock      & \cls{ClaudeRedactedThinkingBlock} & \texttt{data} \\
+ServerToolUse, WebSearch*, etc. & Server result subclasses & Read-only,
+  raw JSON stored \\
+Usage, MessageDeltaUsage   & \cls{ClaudeUsage}          & Single class \\
+ToolParam, ToolUnionParam  & \cls{ClaudeTool}           & Unified \\
+ToolInputSchemaParam       & \cls{ClaudeToolInputSchema} & Schema builder \\
+ToolResultBlockParam       & \cls{ClaudeToolResultBlock} & In hierarchy \\
+ToolChoiceUnionParam       & Dictionary                 & Dynamic structure \\
+ThinkingConfigParamUnion   & \cls{ClaudeThinkingParams} & Typed class; 3 modes:
+  enabled, adaptive, disabled \\
+StopReason (enum)          & Symbol                     & 6 values \\
+Model (enum)               & \cls{ClaudeModel} class methods & Factory
+  pattern; alias + dated \\
+ModelInfo                  & \cls{ClaudeModelInfo}      & From Models API \\
+MessageTokensCount         & \cls{ClaudeMessageTokensCount} & From CountTokens \\
+MessageStreamEventUnion    & \cls{ClaudeStreamEvent} subclasses & Polymorphic \\
+*Delta types (5)           & Embedded in event subclasses & Simplified \\
+RawContentBlockDeltaUnion  & Discriminated in accumulator & 5 delta subtypes \\
+Base64PDFSource            & \cls{ClaudeDocumentBlock}       & Document content block
+  with \cls{ClaudeDocumentSource} hierarchy (5 source types) \\
+CacheControlEphemeralParam & \cls{ClaudeCacheControl}   & Typed class with optional TTL \\
+MetadataParam              & Dictionary                 & Dynamic structure \\
+ServiceTier                & String                     & \texttt{'standard'} etc. \\
+MessageBatch*              & Deferred                   & v2 \\
+Beta*                      & Deferred                   & v2 \\
+Bedrock*, Vertex*          & Out of scope               & --- \\
+Completion*                & Out of scope               & Legacy \\
+\bottomrule
+\end{longtable}
+\normalsize
+\end{center}
+
+\section{Pharo Threading Quick Reference}
+
+Pharo uses cooperative scheduling.  Processes at the same priority level
+run one at a time, yielding at I/O waits, explicit yields (\texttt{Processor
+yield}), and semaphore waits.  Higher-priority processes preempt lower ones.
+This is \emph{not} parallel execution --- a CPU-bound process at user
+priority will starve other user-priority processes until it yields.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lY@{}}
+\toprule
+\textbf{Primitive} & \textbf{Usage} \\
+\midrule
+\texttt{[ ... ] fork}  & Spawn a Process at the same priority as the
+  caller.  Does not inherit the caller's stack. \\
+\texttt{[ ... ] forkAt:named:} & Spawn at a specific priority with a name.
+  Use \texttt{Processor userBackgroundPriority} for SDK work. \\
+\texttt{Semaphore new}  & Binary signal/wait.  Use for ``notify when
+  done.'' \\
+\texttt{SharedQueue new} & Thread-safe FIFO.  Use for producer/consumer
+  event passing.  \texttt{next} blocks until an item is available. \\
+\texttt{Mutex new}      & Mutual exclusion.  Use for shared mutable
+  state (rare in this SDK). \\
+\texttt{Delay forSeconds:} & Non-busy wait.  Yields to other processes
+  during the delay.  Used for retry backoff. \\
+\texttt{WorldState defer: [ ... ]} & Schedule a block to run on the
+  Morphic UI thread.  Required for any Morph modification from a
+  background Process. \\
+\texttt{Process>>terminate} & Kill a running process.  Use for
+  cancellation (e.g., abort a streaming request).  Closes any
+  associated sockets. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\end{document}

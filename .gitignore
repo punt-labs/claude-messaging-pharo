@@ -1,0 +1,24 @@
+# Pharo VM and image
+pharo/
+
+# Runtime state (port-specific: .pharo-8422.pid, .pharo-8423.pid, etc.)
+.pharo-*.pid
+.pharo-*.log
+.tmp/
+
+# Pharo debug logs
+PharoDebug.log
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+
+# macOS
+.DS_Store
+
+.biff.local

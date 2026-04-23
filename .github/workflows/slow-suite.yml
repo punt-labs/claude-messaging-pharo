@@ -1,0 +1,101 @@
+name: Slow Suite
+
+# Runs the Messaging SDK full test suite (including tests-integration protocol)
+# against the real Anthropic API. Integration failures are visible but do NOT
+# block merge (continue-on-error: true). Branch protection does not require
+# this check.
+#
+# Triggers:
+#   - schedule:         nightly at 09:17 UTC
+#   - pull_request:     label-gated via 'run-live-tests' label
+#   - workflow_dispatch: manual run from the Actions tab
+#
+# ANTHROPIC_API_KEY secret: must be configured in repo Settings > Secrets and
+# variables > Actions before this workflow can run. When the secret is absent
+# (fork PR, unconfigured repo) the job skips gracefully.
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slow-suite-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  slow-suite:
+    name: Slow Suite (live Anthropic API)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'run-live-tests')
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Guard — skip when API key is absent
+        id: guard
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "ANTHROPIC_API_KEY is not available in this context."
+            echo "Expected for fork PRs — pwn-request mitigation by design."
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ANTHROPIC_API_KEY is present. Proceeding with live-API test run."
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build image + load SDK packages
+        if: steps.guard.outputs.has_key == 'true'
+        run: make setup
+
+      - name: Run full test suite (ClaudeMessagingTestSuite fullSuite)
+        if: steps.guard.outputs.has_key == 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          ./pharo/pharo --headless ./pharo/Pharo.image eval "
+            | result summary passed |
+            result := ClaudeMessagingTestSuite fullSuite run.
+            summary := 'MessagingSlowSuiteResult Tests: ', result runCount printString,
+              ' Passed: ', result passedCount printString,
+              ' Failures: ', result failureCount printString,
+              ' Errors: ', result errorCount printString.
+            Transcript show: summary; cr.
+            FileStream stdout nextPutAll: summary; lf; flush.
+            passed := result failureCount = 0 and: [ result errorCount = 0 ].
+            Smalltalk snapshot: false andQuit: (passed ifTrue: [ 0 ] ifFalse: [ 1 ])
+          " 2>&1 | tee slow-suite.log
+          pharo_rc=${PIPESTATUS[0]}
+          if [ "${pharo_rc}" -ne 0 ]; then
+            echo "slow suite: pharo exited non-zero"
+            exit 1
+          fi
+          if ! grep -q 'MessagingSlowSuiteResult' slow-suite.log; then
+            echo "slow suite: no summary line — Pharo likely crashed"
+            exit 1
+          fi
+          if ! grep -q 'Failures: 0' slow-suite.log; then
+            echo "slow suite: failures present"
+            exit 1
+          fi
+          if ! grep -q 'Errors: 0' slow-suite.log; then
+            echo "slow suite: errors present"
+            exit 1
+          fi
+          echo "slow suite: 0 failures, 0 errors"
+
+      - name: Report skip
+        if: steps.guard.outputs.has_key != 'true'
+        run: |
+          echo "Slow suite skipped: ANTHROPIC_API_KEY not available."

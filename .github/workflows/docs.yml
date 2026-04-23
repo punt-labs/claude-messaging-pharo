@@ -1,0 +1,59 @@
+name: Docs
+
+# Trigger 1: markdown lint + optional PDF build on every push/PR
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Workflow-level permission: read only. The release job scopes write at job level.
+permissions:
+  contents: read
+
+jobs:
+  # This job name is the required status check context. Must match exactly.
+  # Branch protection requires: "docs"
+  docs:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: DavidAnson/markdownlint-cli2-action@2256fe35224a451507c8848ec825a4212e9eeb00 # v22
+        with:
+          globs: "**/*.md"
+
+  spec-pdf:
+    name: Build specification PDFs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install pdflatex
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends texlive-latex-base texlive-latex-extra texlive-fonts-recommended
+
+      - name: Build messaging-specification.pdf (two-pass)
+        run: |
+          cd docs/specifications
+          pdflatex -interaction=nonstopmode messaging-specification.tex
+          pdflatex -interaction=nonstopmode messaging-specification.tex
+
+      - name: Build messaging-specification-pharo-notes.pdf (two-pass)
+        run: |
+          cd docs/specifications
+          pdflatex -interaction=nonstopmode messaging-specification-pharo-notes.tex
+          pdflatex -interaction=nonstopmode messaging-specification-pharo-notes.tex
+
+      - name: Upload PDFs as artifacts
+        # SHA-pinned to actions/upload-artifact v4.3.3
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: specification-pdfs
+          path: |
+            docs/specifications/messaging-specification.pdf
+            docs/specifications/messaging-specification-pharo-notes.pdf
+          retention-days: 30
