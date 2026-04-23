@@ -13,9 +13,10 @@ permissions:
 
 jobs:
   # This job name is the required status check context. Must match exactly.
-  # Branch protection requires: "docs"
+  # Branch protection requires: "docs". Do NOT add a `name:` override —
+  # that would change the check run's reported name from "docs" to the
+  # override, and the required-status-check rule would stop matching.
   docs:
-    name: Markdown lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -25,7 +26,6 @@ jobs:
           globs: "**/*.md"
 
   spec-pdf:
-    name: Build specification PDFs
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

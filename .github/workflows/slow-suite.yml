@@ -30,7 +30,6 @@ concurrency:
 
 jobs:
   slow-suite:
-    name: Slow Suite (live Anthropic API)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true
