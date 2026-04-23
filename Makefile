@@ -55,6 +55,7 @@ $(VM): | $(IMAGE_DIR)
 $(IMAGE): $(VM)
 	@echo ">> Downloading fresh Pharo $(PHARO_VERSION) image..."
 	cd $(IMAGE_DIR) && curl -fsSL http://files.pharo.org/get-files/$(PHARO_VERSION)/pharoImage-x86_64.zip -o image.zip \
+		&& rm -f Pharo.image Pharo.changes \
 		&& unzip -o image.zip \
 		&& mv Pharo*.image Pharo.image \
 		&& mv Pharo*.changes Pharo.changes \
@@ -62,6 +63,9 @@ $(IMAGE): $(VM)
 	@echo "  ok Fresh image ready"
 
 setup: $(IMAGE)
+	@echo ">> Loading Postern (eval server) via Metacello..."
+	$(VM) --headless $(IMAGE) eval --save "Metacello new baseline: 'Postern'; repository: 'github://punt-labs/postern:main/src'; load"
+	@echo "  ok Postern loaded"
 	@echo ">> Loading Tonel packages into image..."
 	$(VM) --headless $(IMAGE) eval --save "$(LOAD_PACKAGES_EXPR)"
 	@echo "  ok All packages loaded and image saved"
@@ -78,7 +82,7 @@ start: $(VM)
 		fi; \
 		echo ">> Starting Pharo on port $(PORT)..."; \
 		DISPLAY=$${DISPLAY:-:1} $(IMAGE_DIR)/pharo-vm/pharo $(IMAGE) eval --no-quit \
-			"ZnServer startDefaultOn: $(PORT). ZnServer default delegate: BootstrapEvalDelegate new" \
+			"PosternServer startOn: $(PORT)" \
 			> $(LOG_FILE) 2>&1 & \
 		echo $$! > $(PID_FILE); \
 		for i in $$(seq 1 30); do \
@@ -319,10 +323,11 @@ check-packages:
 		"| dir expected loaded missing | \
 		dir := '$(SRC_DIR)' asFileReference. \
 		expected := ((dir children select: [ :d | d isDirectory and: [ (d / 'package.st') exists ] ]) collect: [ :d | d basename ]) asSet. \
-		loaded := (Smalltalk globals allClasses select: [ :c | \
+		loaded := ((Smalltalk globals allClasses select: [ :c | \
 			(c package name beginsWith: 'Claude-Messaging-') or: [ \
-				c package name beginsWith: 'PharoKeyring' ] ]) \
-			collect: [ :c | c package name ] as: Set. \
+				(c package name beginsWith: 'PharoKeyring') or: [ \
+					c package name = 'BaselineOfClaudeMessaging' ] ] ]) \
+			collect: [ :c | c package name ]) asSet. \
 		missing := expected difference: loaded. \
 		missing isEmpty \
 			ifTrue: [ 'OK:', expected size printString, ' packages on disk, all loaded' ] \

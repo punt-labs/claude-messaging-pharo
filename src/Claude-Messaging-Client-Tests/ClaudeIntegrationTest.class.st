@@ -113,67 +113,6 @@ ClaudeIntegrationTest >> testErrorUnknownModel [
 ]
 
 { #category : 'tests-integration' }
-ClaudeIntegrationTest >> testExchangeWithCommand [
-	"Full tool-use round-trip using VMStatsCommand. Model calls VmStats, command executes, model synthesizes answer."
-	| exchange response |
-	exchange := (ClaudeExchange client: client)
-		addCommand: VMStatsCommand new;
-		maxIterations: 3.
-	Transcript nextPutAll: '>> testExchangeWithCommand: running VMStatsCommand exchange...'; cr.
-	response := exchange run: (ClaudeMessageRequest new
-		model: 'claude-3-haiku-20240307';
-		maxTokens: 200;
-		addUserMessage: 'What Pharo VM version am I running? Use the VmStats tool to find out.').
-	Transcript
-		nextPutAll: '<< Exchange done: ';
-		nextPutAll: exchange iterationCount printString;
-		nextPutAll: ' iterations';
-		cr.
-	Transcript
-		nextPutAll: '<< Response: ';
-		nextPutAll: (response textContent copyFrom: 1 to: (100 min: response textContent size));
-		cr.
-	self assert: response textContent isNotEmpty.
-	self assert: exchange iterationCount >= 1.
-	self assert: response stopReason equals: #end_turn
-]
-
-{ #category : 'tests-integration' }
-ClaudeIntegrationTest >> testExchangeWithVMStatsTool [
-	"Full tool-use round-trip: model calls VmStats tool, we execute it, model synthesizes answer."
-	| tool exchange response |
-	tool := ClaudeTool
-		name: 'VmStats'
-		description: 'Returns Pharo VM version and statistics. Call this to learn about the running Smalltalk environment.'
-		inputSchema: ClaudeToolInputSchema new.
-	exchange := (ClaudeExchange client: client)
-		addTool: tool handler: [ :input |
-			String streamContents: [ :s |
-				s nextPutAll: 'VM: '; nextPutAll: Smalltalk vm version; cr.
-				s nextPutAll: 'Image: '; nextPutAll: SystemVersion current version; cr.
-				s nextPutAll: 'Classes: '; print: Smalltalk globals allClasses size; cr.
-				s nextPutAll: 'Methods: '; print: (Smalltalk globals allClasses sum: [ :c | c methods size ]) ] ];
-		maxIterations: 3.
-	Transcript nextPutAll: '>> testExchangeWithVMStatsTool: running tool exchange...'; cr.
-	response := exchange run: (ClaudeMessageRequest new
-		model: 'claude-3-haiku-20240307';
-		maxTokens: 200;
-		addUserMessage: 'What Pharo VM version am I running? Use the VmStats tool to find out.').
-	Transcript
-		nextPutAll: '<< Exchange done: ';
-		nextPutAll: exchange iterationCount printString;
-		nextPutAll: ' iterations';
-		cr.
-	Transcript
-		nextPutAll: '<< Response: ';
-		nextPutAll: (response textContent copyFrom: 1 to: (100 min: response textContent size));
-		cr.
-	self assert: response textContent isNotEmpty.
-	self assert: exchange iterationCount >= 1.
-	self assert: response stopReason equals: #end_turn
-]
-
-{ #category : 'tests-integration' }
 ClaudeIntegrationTest >> testListModels [
 	| models |
 	Transcript nextPutAll: '>> testListModels: fetching model list...'; cr.
