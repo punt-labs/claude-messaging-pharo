@@ -1,5 +1,5 @@
 "
-End-to-end integration tests against the real Claude API. Requires an API key in the system keyring. Tests assert prerequisites and fail clearly when missing; they are excluded from make test. Uses claude-3-haiku (cheapest model) with low maxTokens to minimize cost.
+End-to-end integration tests against the real Claude API. Requires an API key in the system keyring. Tests assert prerequisites and fail clearly when missing; they are excluded from make test. Rotates across current-catalog models (opus47, opus46, sonnet46) with low maxTokens to minimize cost.
 
   ClaudeIntegrationTest buildSuite run
   >>> a TestResult
@@ -22,16 +22,34 @@ ClaudeIntegrationTest >> apiKey [
 ]
 
 { #category : 'private' }
-ClaudeIntegrationTest >> modelId [
-	"Cheapest available model for integration tests"
-	^ 'claude-3-haiku-20240307'
+ClaudeIntegrationTest >> modelOpus46 [
+	"Current-catalog Opus 4.6 identifier for integration tests"
+	^ ClaudeModel opus46
+]
+
+{ #category : 'private' }
+ClaudeIntegrationTest >> modelOpus47 [
+	"Current-catalog Opus 4.7 identifier for integration tests"
+	^ ClaudeModel opus47
+]
+
+{ #category : 'private' }
+ClaudeIntegrationTest >> modelSonnet46 [
+	"Current-catalog Sonnet 4.6 identifier for integration tests"
+	^ ClaudeModel sonnet46
 ]
 
 { #category : 'private' }
 ClaudeIntegrationTest >> newParams: prompt maxTokens: max [
+	"Default model for tests that don't specify one. Uses Sonnet 4.6 as the lowest-cost current model."
+	^ self newParams: prompt maxTokens: max model: self modelSonnet46
+]
+
+{ #category : 'private' }
+ClaudeIntegrationTest >> newParams: prompt maxTokens: max model: modelId [
 	| params |
 	params := ClaudeMessageRequest new.
-	params model: self modelId.
+	params model: modelId.
 	params maxTokens: max.
 	params addUserMessage: prompt.
 	^ params
@@ -56,7 +74,7 @@ ClaudeIntegrationTest >> setUp [
 { #category : 'tests-integration' }
 ClaudeIntegrationTest >> testCountTokens [
 	| params result |
-	params := self newParams: 'Hello' maxTokens: 50.
+	params := self newParams: 'Hello' maxTokens: 50 model: self modelOpus46.
 	Transcript nextPutAll: '>> testCountTokens: counting tokens...'; cr.
 	result := client countTokens: params.
 	Transcript
@@ -70,12 +88,10 @@ ClaudeIntegrationTest >> testCountTokens [
 
 { #category : 'tests-integration' }
 ClaudeIntegrationTest >> testErrorInvalidKey [
+	"Model choice is immaterial - the 401 fires before model lookup. Use the default helper."
 	| badClient params |
 	badClient := ClaudeClient apiKey: 'sk-invalid'.
-	params := ClaudeMessageRequest new.
-	params model: self modelId.
-	params maxTokens: 50.
-	params addUserMessage: 'Hello'.
+	params := self newParams: 'Hello' maxTokens: 50.
 	Transcript nextPutAll: '>> testErrorInvalidKey: expecting 401...'; cr.
 	self
 		should: [ badClient sendMessage: params ]
@@ -131,7 +147,7 @@ ClaudeIntegrationTest >> testListModels [
 { #category : 'tests-integration' }
 ClaudeIntegrationTest >> testMultiTurnConversation [
 	| params firstResponse secondResponse |
-	params := self newParams: 'What is 2+2? Reply with just the number.' maxTokens: 50.
+	params := self newParams: 'What is 2+2? Reply with just the number.' maxTokens: 50 model: self modelSonnet46.
 	Transcript nextPutAll: '>> testMultiTurnConversation: sending first turn...'; cr.
 	firstResponse := client sendMessage: params.
 	Transcript
@@ -300,7 +316,7 @@ ClaudeIntegrationTest >> testRealStreamingViaClient [
 { #category : 'tests-integration' }
 ClaudeIntegrationTest >> testSendMessage [
 	| params response |
-	params := self newParams: 'Reply with exactly: hello' maxTokens: 50.
+	params := self newParams: 'Reply with exactly: hello' maxTokens: 50 model: self modelOpus47.
 	Transcript
 		nextPutAll: '>> testSendMessage: sending to ';
 		nextPutAll: client baseUrl;
@@ -325,7 +341,7 @@ ClaudeIntegrationTest >> testSendMessage [
 { #category : 'tests-integration' }
 ClaudeIntegrationTest >> testStreamMessage [
 	| params events message |
-	params := self newParams: 'Reply with exactly: hi' maxTokens: 50.
+	params := self newParams: 'Reply with exactly: hi' maxTokens: 50 model: self modelOpus46.
 	Transcript nextPutAll: '>> testStreamMessage: streaming...'; cr.
 	events := OrderedCollection new.
 	message := client streamMessage: params do: [ :event |
