@@ -88,12 +88,10 @@ ClaudeIntegrationTest >> testCountTokens [
 
 { #category : 'tests-integration' }
 ClaudeIntegrationTest >> testErrorInvalidKey [
+	"Model choice is immaterial - the 401 fires before model lookup. Use the default helper."
 	| badClient params |
 	badClient := ClaudeClient apiKey: 'sk-invalid'.
-	params := ClaudeMessageRequest new.
-	params model: self modelSonnet46.
-	params maxTokens: 50.
-	params addUserMessage: 'Hello'.
+	params := self newParams: 'Hello' maxTokens: 50.
 	Transcript nextPutAll: '>> testErrorInvalidKey: expecting 401...'; cr.
 	self
 		should: [ badClient sendMessage: params ]
