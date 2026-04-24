@@ -1,4 +1,4 @@
-# claude-messaging-pharo
+# anthropic-sdk-pharo
 
 The Claude Messaging SDK for Pharo — a Smalltalk client for Anthropic's
 Messages API. This file is Claude Code's project instructions for the

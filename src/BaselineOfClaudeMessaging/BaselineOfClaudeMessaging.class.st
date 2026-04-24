@@ -7,14 +7,14 @@ No groups, no tiers — one baseline:load loads everything.
 
   Metacello new
     baseline: 'ClaudeMessaging';
-    repository: 'github://punt-labs/claude-messaging-pharo:main/src';
+    repository: 'github://punt-labs/anthropic-sdk-pharo:main/src';
     load.
 
 ### Pinning to a release tag
 
   Metacello new
     baseline: 'ClaudeMessaging';
-    repository: 'github://punt-labs/claude-messaging-pharo:v1.0.0/src';
+    repository: 'github://punt-labs/anthropic-sdk-pharo:v1.0.0/src';
     load.
 
 ### After loading

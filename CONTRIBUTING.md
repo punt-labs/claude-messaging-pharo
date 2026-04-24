@@ -11,8 +11,8 @@
 ### Setup
 
 ```bash
-git clone git@github.com:punt-labs/claude-messaging-pharo.git
-cd claude-messaging-pharo
+git clone git@github.com:punt-labs/anthropic-sdk-pharo.git
+cd anthropic-sdk-pharo
 make setup    # downloads Pharo 12 VM + image, loads all packages
 make start    # launches Pharo with eval server on port 8422
 ```

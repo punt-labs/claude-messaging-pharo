@@ -1,4 +1,4 @@
-# claude-messaging-pharo — Claude Messaging SDK for Pharo
+# anthropic-sdk-pharo — Claude Messaging SDK for Pharo
 #
 # Image lifecycle:
 #   make setup      — download Pharo VM + image, load all packages
