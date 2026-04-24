@@ -11,7 +11,7 @@ Load via Metacello:
 ```smalltalk
 Metacello new
   baseline: 'ClaudeMessaging';
-  repository: 'github://punt-labs/claude-messaging-pharo:v1.0.0/src';
+  repository: 'github://punt-labs/anthropic-sdk-pharo:v1.0.0/src';
   load.
 ```
 
@@ -109,7 +109,7 @@ request betas: { ClaudeBetaHeader mcpClient }.
 ## Development
 
 ```bash
-git clone git@github.com:punt-labs/claude-messaging-pharo.git
+git clone git@github.com:punt-labs/anthropic-sdk-pharo.git claude-messaging-pharo
 cd claude-messaging-pharo
 make setup   # download Pharo 12 + load packages
 make start   # start eval server on port 8422
