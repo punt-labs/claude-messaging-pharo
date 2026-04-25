@@ -22,13 +22,17 @@ succeed -- if it fails, source files are incomplete.
 
 ### Development Model
 
-All development happens inside the running Pharo image via the eval server
-(HTTP POST to `http://localhost:8422/repl`). The eval server provides
-interactive class definition, method compilation, testing, and introspection.
+All development happens inside the running Pharo image via
+[Postern](https://github.com/punt-labs/postern), a separate Pharo product
+that exposes the live image as an HTTP eval endpoint at
+`http://localhost:8422/repl`. `make setup` loads Postern as a bootstrap
+dependency so the eval server is ready when the image starts. Through
+Postern you can define classes, compile methods, run tests, and introspect
+the image without leaving Pharo's runtime or going through file-in.
 
-- Define classes via eval server using Pharo 12 fluid syntax
-- Compile methods via eval server using `compile:classified:`
-- Run tests via eval server or `make test`
+- Define classes via Postern using Pharo 12 fluid syntax
+- Compile methods via Postern using `compile:classified:`
+- Run tests via Postern or `make test`
 - Lint via `make lint` from CLI (the canonical gate — `m critiques` misses
   class-level rules)
 - Persist code to disk via Iceberg (inside the VM), which writes Tonel
