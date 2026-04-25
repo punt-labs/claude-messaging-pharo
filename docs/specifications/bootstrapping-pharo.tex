@@ -322,9 +322,34 @@ Phase 3 transferred self-improvement capability to the internal agent.
 This work, along with the full agent runtime, continues in the separate
 \texttt{claude-agent-sdk-pharo} repository.
 
-\subsection{Phase 4: Internal Agent Builds the Display Server}
+\subsection{Phase 4: Internal Agent Extends Pharo --- By Building Anything}
 
-Phase 4 (display server integration) is deferred to a future product.
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lY@{}}
+\toprule
+\textbf{Builder} & \cls{PharoAgent} (inside the image) \\
+\textbf{Target} & Any in-image extension --- UI components, developer
+  tools, integration services, packages \\
+\textbf{Substrate} & Live Pharo image with full introspection \\
+\textbf{Tools} & Postern, Iceberg, agent self-modification primitives \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Once Phase~3 has handed the image over to the internal agent, Phase~4
+is open-ended.  The agent does not need a specific external project to
+target.  It can build new Morphic UI on demand without a fixed widget
+vocabulary, add developer tools that extend the System Browser,
+Inspector, or Test Runner, stand up integration services (HTTP
+endpoints, MCP servers, message queues) that other systems consume,
+define new packages that capture domain abstractions discovered during
+use, and refactor and reorganize its own code as patterns emerge.
+
+The point is not any one of these.  The external bootstrap was the
+means; an in-image agent that can extend Pharo arbitrarily is the
+result.  The Messaging SDK shipped here is the first such product.
+Future work in \texttt{claude-agent-sdk-pharo} carries this capability
+forward.
 
 % ===================================================================
 \section{Key Design Decisions}
