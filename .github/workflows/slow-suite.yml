@@ -73,7 +73,7 @@ jobs:
               ' Failures: ', result failureCount printString,
               ' Errors: ', result errorCount printString.
             Transcript show: summary; cr.
-            FileStream stdout nextPutAll: summary; lf; flush.
+            Stdio stdout nextPutAll: summary; lf; flush.
             passed := result failureCount = 0 and: [ result errorCount = 0 ].
             Smalltalk snapshot: false andQuit: (passed ifTrue: [ 0 ] ifFalse: [ 1 ])
           " 2>&1 | tee slow-suite.log
