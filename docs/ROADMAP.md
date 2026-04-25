@@ -15,7 +15,7 @@ of `anthropic-sdk-python`.
 - **Messages API**: `sendMessage:`, `streamMessage:do:`, `countTokens:`,
   multi-turn conversations, prompt caching, citations, extended
   thinking, interleaved thinking
-- **Files API**: upload, list, get, delete
+- **Files API**: upload, list, get-metadata, download, delete
   (`files-api-2025-04-14` beta)
 - **Skills API**: CRUD on reusable tool packages
   (`skills-2025-10-02` beta)
