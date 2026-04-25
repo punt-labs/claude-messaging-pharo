@@ -1,4 +1,4 @@
-# Contributing to Claude Messaging SDK for Pharo
+# Contributing to Claude SDK for Pharo
 
 ## Development Environment
 
@@ -173,8 +173,8 @@ make check
 
 ## Documentation
 
-If you changed `docs/specifications/messaging-specification.tex` or
-`messaging-specification-pharo-notes.tex`, rebuild the PDFs with
+If you changed `docs/specifications/claude-sdk-specification.tex` or
+`claude-sdk-specification-pharo-notes.tex`, rebuild the PDFs with
 `make spec` (requires `pdflatex` installed). Commit both the `.tex` and
 `.pdf` changes together — the PDF is the published artifact and must
 stay in sync with the source.
@@ -224,9 +224,9 @@ them.
 
 - [DESIGN.md](DESIGN.md) — Architecture Decision Records
 - [CHANGELOG.md](CHANGELOG.md) — release history
-- [docs/specifications/messaging-specification.pdf](docs/specifications/messaging-specification.pdf)
+- [docs/specifications/claude-sdk-specification.pdf](docs/specifications/claude-sdk-specification.pdf)
   — the full Messaging API specification
-- [docs/specifications/messaging-specification-pharo-notes.pdf](docs/specifications/messaging-specification-pharo-notes.pdf)
+- [docs/specifications/claude-sdk-specification-pharo-notes.pdf](docs/specifications/claude-sdk-specification-pharo-notes.pdf)
   — Pharo-specific implementation notes
 - [docs/specifications/bootstrapping-pharo.pdf](docs/specifications/bootstrapping-pharo.pdf)
   — bootstrap mechanism

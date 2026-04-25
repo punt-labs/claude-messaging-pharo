@@ -44,17 +44,17 @@ jobs:
             texlive-fonts-recommended \
             cm-super
 
-      - name: Build messaging-specification.pdf (two-pass)
+      - name: Build claude-sdk-specification.pdf (two-pass)
         run: |
           cd docs/specifications
-          pdflatex -interaction=nonstopmode messaging-specification.tex
-          pdflatex -interaction=nonstopmode messaging-specification.tex
+          pdflatex -interaction=nonstopmode claude-sdk-specification.tex
+          pdflatex -interaction=nonstopmode claude-sdk-specification.tex
 
-      - name: Build messaging-specification-pharo-notes.pdf (two-pass)
+      - name: Build claude-sdk-specification-pharo-notes.pdf (two-pass)
         run: |
           cd docs/specifications
-          pdflatex -interaction=nonstopmode messaging-specification-pharo-notes.tex
-          pdflatex -interaction=nonstopmode messaging-specification-pharo-notes.tex
+          pdflatex -interaction=nonstopmode claude-sdk-specification-pharo-notes.tex
+          pdflatex -interaction=nonstopmode claude-sdk-specification-pharo-notes.tex
 
       - name: Upload PDFs as artifacts
         # SHA-pinned to actions/upload-artifact v4.3.3
@@ -62,6 +62,6 @@ jobs:
         with:
           name: specification-pdfs
           path: |
-            docs/specifications/messaging-specification.pdf
-            docs/specifications/messaging-specification-pharo-notes.pdf
+            docs/specifications/claude-sdk-specification.pdf
+            docs/specifications/claude-sdk-specification-pharo-notes.pdf
           retention-days: 30

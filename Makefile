@@ -1,4 +1,4 @@
-# anthropic-sdk-pharo — Claude Messaging SDK for Pharo
+# anthropic-sdk-pharo — Claude SDK for Pharo
 #
 # Image lifecycle:
 #   make setup      — download Pharo VM + image, load all packages
@@ -16,7 +16,7 @@
 #   make drift      — compare in-image methods vs on-disk Tonel
 #   make status     — health check
 #   make transcript — read Pharo Transcript
-#   make spec       — build messaging-specification PDFs (requires pdflatex)
+#   make spec       — build claude-sdk-specification PDFs (requires pdflatex)
 
 PHARO_VERSION := 120
 PORT := $(or $(EVAL_PORT),8422)
@@ -344,12 +344,12 @@ transcript:
 	@$(CURL) -d "Transcript contents" || echo "Error: is the server running? (make start)"
 
 spec:
-	@echo ">> Building messaging-specification PDFs (two-pass)..."
-	cd docs/specifications && pdflatex -interaction=nonstopmode messaging-specification.tex
-	cd docs/specifications && pdflatex -interaction=nonstopmode messaging-specification.tex
-	cd docs/specifications && pdflatex -interaction=nonstopmode messaging-specification-pharo-notes.tex
-	cd docs/specifications && pdflatex -interaction=nonstopmode messaging-specification-pharo-notes.tex
-	@echo "  ok PDFs built: messaging-specification.pdf, messaging-specification-pharo-notes.pdf"
+	@echo ">> Building claude-sdk-specification PDFs (two-pass)..."
+	cd docs/specifications && pdflatex -interaction=nonstopmode claude-sdk-specification.tex
+	cd docs/specifications && pdflatex -interaction=nonstopmode claude-sdk-specification.tex
+	cd docs/specifications && pdflatex -interaction=nonstopmode claude-sdk-specification-pharo-notes.tex
+	cd docs/specifications && pdflatex -interaction=nonstopmode claude-sdk-specification-pharo-notes.tex
+	@echo "  ok PDFs built: claude-sdk-specification.pdf, claude-sdk-specification-pharo-notes.pdf"
 
 # ── Clean ──────────────────────────────────────────────
 

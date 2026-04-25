@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the Claude Messaging SDK for Pharo are documented
+All notable changes to the Claude SDK for Pharo are documented
 here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres
 to [Semantic Versioning](https://semver.org/).
@@ -74,22 +74,22 @@ to [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 
-- Messaging specification (`docs/specifications/messaging-specification.tex`)
+- SDK specification (`docs/specifications/claude-sdk-specification.tex`)
   tracks the Skills API, MCP connector, files API, beta-header
   catalog, and streaming semantics.
 - Pharo implementation notes
-  (`docs/specifications/messaging-specification-pharo-notes.tex`)
+  (`docs/specifications/claude-sdk-specification-pharo-notes.tex`)
   cover LF/CR normalization, STONJSON conventions, and the Metacello
   baseline.
-- Cascade-yourself audit of the messaging specification
+- Cascade-yourself audit of the SDK specification
   (completeness review vs the live Go SDK).
 
 ### Project
 
 - Initial extraction from `claude-agent-sdk-smalltalk@74b77d2`. This
-  repo ships the Claude Messaging SDK for Pharo as a standalone
-  product; the Agent SDK, Agent Workbench, and Pharo Agent Bridge
-  remain in the `claude-agent-sdk-smalltalk` repo.
+  repo ships the Claude SDK for Pharo as a standalone product; the
+  Agent SDK, Agent Workbench, and Pharo Agent Bridge remain in the
+  `claude-agent-sdk-smalltalk` repo.
 - Ethos mission adoption — all delegation via ethos mission
   contracts with typed write-sets, success criteria, budgets, and
   evaluators.

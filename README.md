@@ -1,6 +1,6 @@
-# Claude Messaging SDK for Pharo
+# Claude SDK for Pharo
 
-A Smalltalk client for [Anthropic's Claude Messages API](https://docs.anthropic.com/en/api/messages).
+The Claude SDK for Pharo provides access to the [Claude API](https://docs.anthropic.com/en/api/) from Pharo applications.
 Send messages, stream responses, use tools, upload files, and access the
 full Claude API surface — all from a live Pharo 12 image.
 
@@ -18,7 +18,7 @@ Metacello new
 Requires Pharo 12 (x86\_64 or arm64). No external dependencies beyond
 Pharo's built-in Zinc HTTP and STONJSON.
 
-## Quick start
+## Getting started
 
 ```smalltalk
 | client response |
@@ -121,9 +121,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [CLAUDE.md](CLAUDE.md).
 
 ## Specification
 
-Full API specification: [messaging-specification.pdf](docs/specifications/messaging-specification.pdf)
+Full API specification: [claude-sdk-specification.pdf](docs/specifications/claude-sdk-specification.pdf)
 (also available as a GitHub Release asset).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.

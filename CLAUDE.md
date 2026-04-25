@@ -1,14 +1,14 @@
 # anthropic-sdk-pharo
 
-The Claude Messaging SDK for Pharo — a Smalltalk client for Anthropic's
+The Claude SDK for Pharo — a Smalltalk client for Anthropic's
 Messages API. This file is Claude Code's project instructions for the
 new standalone repo; it covers architecture, engineering conventions,
 and the contributor workflow.
 
 ## The Product
 
-This repository ships one product: the **Claude Messaging SDK for
-Pharo**. Public-facing description lives in [README.md](README.md).
+This repository ships one product: the **Claude SDK for Pharo**.
+Public-facing description lives in [README.md](README.md).
 The SDK wraps the [Anthropic Messages API](https://docs.anthropic.com/en/api/messages)
 with first-class Smalltalk domain objects: messages, content blocks,
 tools, files, MCP connectors, skills. It depends only on Pharo 12's
@@ -152,7 +152,7 @@ make drift      # compare in-image methods vs on-disk Tonel (detect drift)
 make status     # health check — packages loaded count
 make transcript # read Pharo Transcript
 make eval       # interactive Smalltalk eval (stdin → eval server)
-make spec       # build messaging-specification PDFs (requires pdflatex)
+make spec       # build claude-sdk-specification PDFs (requires pdflatex)
 ```
 
 ## Image Discipline
@@ -577,9 +577,9 @@ class hierarchy and polymorphic dispatch over conditionals.
 
 ## Specification
 
-- [`docs/specifications/messaging-specification.pdf`](docs/specifications/messaging-specification.pdf)
+- [`docs/specifications/claude-sdk-specification.pdf`](docs/specifications/claude-sdk-specification.pdf)
   — the full Messaging API specification for this SDK.
-- [`docs/specifications/messaging-specification-pharo-notes.pdf`](docs/specifications/messaging-specification-pharo-notes.pdf)
+- [`docs/specifications/claude-sdk-specification-pharo-notes.pdf`](docs/specifications/claude-sdk-specification-pharo-notes.pdf)
   — Pharo-specific implementation notes (LF/CR, STONJSON
   conventions, Metacello baseline).
 - [`docs/specifications/bootstrapping-pharo.pdf`](docs/specifications/bootstrapping-pharo.pdf)

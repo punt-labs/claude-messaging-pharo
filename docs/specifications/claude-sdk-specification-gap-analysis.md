@@ -10,7 +10,7 @@ restructured spec's `Gap (Phase 2): ...` stubs into full sections.
 
 Reference: the Anthropic TOC this is scored against lives at
 `docs/research/anthropic-messaging-api-docs-toc.md`. The Pharo spec it
-maps to is `docs/specifications/messaging-specification.tex`.
+maps to is `docs/specifications/claude-sdk-specification.tex`.
 
 ## How to Read this Table
 

@@ -1,6 +1,6 @@
 %
-% messaging-specification.tex
-% Compile: pdflatex messaging-specification.tex
+% claude-sdk-specification.tex
+% Compile: pdflatex claude-sdk-specification.tex
 %
 
 \documentclass[a4paper,10pt,fleqn]{article}
@@ -42,13 +42,13 @@
 
 \begin{document}
 
-\title{Claude Messaging SDK for Pharo:\\Technical Specification}
+\title{Claude SDK for Pharo:\\Technical Specification}
 \author{Punt Labs}
 \date{April 2026 --- v0.3.0-dev}
 \hypersetup{
-  pdftitle={Claude Messaging SDK for Pharo: Technical Specification},
+  pdftitle={Claude SDK for Pharo: Technical Specification},
   pdfauthor={Punt Labs},
-  pdfsubject={Messaging SDK Specification},
+  pdfsubject={Claude SDK Specification},
   pdfcreator={pdflatex}
 }
 \maketitle
@@ -61,9 +61,9 @@
 Section order mirrors Anthropic's Messages API docs
 (\url{https://docs.claude.com/en/api/messages}).  Unimplemented
 surface is marked \textbf{Gap (Phase 2)}; see
-\texttt{messaging-specification-gap-analysis.md}.  Pharo-specific
+\texttt{claude-sdk-specification-gap-analysis.md}.  Pharo-specific
 implementation notes live in
-\emph{messaging-specification-pharo-notes.tex}.  The Agent layer
+\emph{claude-sdk-specification-pharo-notes.tex}.  The Agent layer
 (tool runner, sub-agents, dashboard) is in the separate
 \emph{Claude Agent SDK for Pharo --- Technical Specification}.
 
@@ -101,7 +101,7 @@ in the request body (no beta), MCP connectors attach via both the
 attach via their own beta headers (\texttt{files-api-2025-04-14},
 \texttt{skills-2025-10-02}) that opt the request into a feature group.
 
-The Claude Messaging SDK for Pharo is a Smalltalk client for
+The Claude SDK for Pharo is a Smalltalk client for
 that API, running inside a live Pharo~12 image.  It
 gives a Smalltalker the same surface a Python or TypeScript developer
 gets from the first-party SDKs --- build a message, send it, read
@@ -174,7 +174,7 @@ response textContent
 Pharo-specific implementation notes --- threading discipline around
 the Morphic UI, Iceberg / Tonel packaging, image save and restore
 behavior, supervised process patterns --- live in the companion
-document \emph{Claude Messaging SDK for Pharo: Pharo-Specific
+document \emph{Claude SDK for Pharo: Pharo-Specific
 Implementation Notes}.
 
 For the full shape of the Messages API surface see

@@ -32,10 +32,10 @@ jobs:
       - name: Build PDFs (two-pass each)
         run: |
           cd docs/specifications
-          pdflatex -interaction=nonstopmode messaging-specification.tex
-          pdflatex -interaction=nonstopmode messaging-specification.tex
-          pdflatex -interaction=nonstopmode messaging-specification-pharo-notes.tex
-          pdflatex -interaction=nonstopmode messaging-specification-pharo-notes.tex
+          pdflatex -interaction=nonstopmode claude-sdk-specification.tex
+          pdflatex -interaction=nonstopmode claude-sdk-specification.tex
+          pdflatex -interaction=nonstopmode claude-sdk-specification-pharo-notes.tex
+          pdflatex -interaction=nonstopmode claude-sdk-specification-pharo-notes.tex
 
       - name: Create GitHub Release with PDFs
         env:
@@ -43,7 +43,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME}"
           gh release create "${VERSION}" \
-            --title "Claude Messaging SDK for Pharo ${VERSION}" \
+            --title "Claude SDK for Pharo ${VERSION}" \
             --notes-file CHANGELOG.md \
-            docs/specifications/messaging-specification.pdf \
-            docs/specifications/messaging-specification-pharo-notes.pdf
+            docs/specifications/claude-sdk-specification.pdf \
+            docs/specifications/claude-sdk-specification-pharo-notes.pdf
