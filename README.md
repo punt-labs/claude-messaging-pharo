@@ -131,6 +131,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [CLAUDE.md](CLAUDE.md).
 Full API specification: [claude-sdk-specification.pdf](docs/specifications/claude-sdk-specification.pdf)
 (also available as a GitHub Release asset).
 
+## Roadmap
+
+Version increments and planned API surface: see [ROADMAP.md](docs/ROADMAP.md).
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
