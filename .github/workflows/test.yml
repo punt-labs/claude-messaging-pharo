@@ -1,0 +1,133 @@
+name: Test
+
+# Messaging SDK unit tests (770 tests, no live API). Runs headlessly in
+# a fresh Pharo 12 image. The fullSuite (which adds the live-API
+# integration protocol) belongs to slow-suite.yml — this workflow
+# stays unit-only so the Test badge reflects deterministic CI state.
+#
+# Triggers:
+#   - push to main
+#   - pull_request to main
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Job name 'test' is the status check context. Do NOT add `name:` —
+  # an override changes the reported context and breaks any required-
+  # status-check rule pointing at "test".
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Build image + load SDK packages
+        run: make setup
+
+      - name: Run unit test suite (ClaudeMessagingTestSuite suite)
+        shell: bash
+        run: |
+          set -o pipefail
+          # Same observability discipline as slow-suite.yml: per-test
+          # FAIL/ERROR/SKIP lines first, aggregate summary last. The
+          # sentinel is `MessagingUnitSuiteResult` — distinct from
+          # slow-suite's `MessagingSlowSuiteResult` so the post-eval
+          # crash detector below matches THIS workflow's summary.
+          ./pharo/pharo --headless ./pharo/Pharo.image eval "
+            | suite result details out summary passed |
+            suite := ClaudeMessagingTestSuite suite.
+            result := TestResult new.
+            details := OrderedCollection new.
+            suite tests do: [ :test |
+              [
+                test announce: TestCaseStarted withResult: result.
+                test runCaseManaged.
+                test announce: TestCaseEnded withResult: result.
+                result addPass: test
+              ] on: TestResult failure , TestResult skip , TestResult warning , TestResult error
+                do: [ :ex |
+                  | label kind msg frames ctx limit |
+                  (ex isKindOf: TestResult warning)
+                    ifTrue: [
+                      ex sunitAnnounce: test toResult: result ]
+                    ifFalse: [
+                      label := test class name , '>>' , test selector.
+                      kind := (ex isKindOf: TestResult failure)
+                        ifTrue: [ 'FAIL' ]
+                        ifFalse: [ (ex isKindOf: TestResult skip)
+                          ifTrue: [ 'SKIP' ]
+                          ifFalse: [ 'ERROR' ] ].
+                      msg := ex messageText.
+                      (msg isNil or: [ msg isEmpty ]) ifTrue: [ msg := ex description ].
+                      msg := msg copyReplaceAll: String cr with: ' '.
+                      msg := msg copyReplaceAll: String lf with: ' '.
+                      frames := OrderedCollection new.
+                      kind = 'ERROR' ifTrue: [
+                        ctx := ex signalerContext.
+                        limit := 3.
+                        [ ctx notNil and: [ limit > 0 ] ] whileTrue: [
+                          frames add: ctx printString.
+                          ctx := ctx sender.
+                          limit := limit - 1 ] ].
+                      details add: { kind. label. ex class name. msg. frames }.
+                      ex sunitAnnounce: test toResult: result ] ] ].
+            out := Stdio stdout.
+            details do: [ :d |
+              | kind label exClass msg frames line |
+              kind := d at: 1.
+              label := d at: 2.
+              exClass := d at: 3.
+              msg := d at: 4.
+              frames := d at: 5.
+              kind = 'FAIL' ifTrue: [
+                line := 'FAIL ' , label , ' : ' , msg.
+                out nextPutAll: line; lf ].
+              kind = 'ERROR' ifTrue: [
+                line := 'ERROR ' , label , ' : ' , exClass , ' -- ' , msg.
+                out nextPutAll: line; lf.
+                frames do: [ :f |
+                  out nextPutAll: '  at ' , f; lf ] ].
+              kind = 'SKIP' ifTrue: [
+                line := 'SKIP ' , label , ' : ' , msg.
+                out nextPutAll: line; lf ] ].
+            out flush.
+            summary := 'MessagingUnitSuiteResult Tests: ', result runCount printString,
+              ' Passed: ', result passedCount printString,
+              ' Failures: ', result failureCount printString,
+              ' Errors: ', result errorCount printString.
+            out nextPutAll: summary; lf; flush.
+            passed := result failureCount = 0 and: [ result errorCount = 0 ].
+            passed ifTrue: [ Smalltalk exitSuccess ] ifFalse: [ Smalltalk exitFailure ]
+          " 2>&1 | tee test.log
+          pharo_rc=${PIPESTATUS[0]}
+          if [ "${pharo_rc}" -ne 0 ]; then
+            echo "test: pharo exited non-zero"
+            exit 1
+          fi
+          if ! grep -q 'MessagingUnitSuiteResult' test.log; then
+            echo "test: no summary line — Pharo likely crashed"
+            exit 1
+          fi
+          if ! grep -q 'Failures: 0' test.log; then
+            echo "test: failures present"
+            exit 1
+          fi
+          if ! grep -q 'Errors: 0' test.log; then
+            echo "test: errors present"
+            exit 1
+          fi
+          echo "test: 0 failures, 0 errors"

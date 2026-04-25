@@ -1,5 +1,12 @@
 # Claude SDK for Pharo
 
+[![License](https://img.shields.io/github/license/punt-labs/anthropic-sdk-pharo)](LICENSE)
+[![Lint](https://img.shields.io/github/actions/workflow/status/punt-labs/anthropic-sdk-pharo/lint.yml?label=Lint)](https://github.com/punt-labs/anthropic-sdk-pharo/actions/workflows/lint.yml)
+[![Test](https://img.shields.io/github/actions/workflow/status/punt-labs/anthropic-sdk-pharo/test.yml?label=Test)](https://github.com/punt-labs/anthropic-sdk-pharo/actions/workflows/test.yml)
+[![Integration](https://img.shields.io/github/actions/workflow/status/punt-labs/anthropic-sdk-pharo/slow-suite.yml?label=Integration)](https://github.com/punt-labs/anthropic-sdk-pharo/actions/workflows/slow-suite.yml)
+[![Docs](https://img.shields.io/github/actions/workflow/status/punt-labs/anthropic-sdk-pharo/docs.yml?label=Docs)](https://github.com/punt-labs/anthropic-sdk-pharo/actions/workflows/docs.yml)
+[![Pharo 12](https://img.shields.io/badge/Pharo-12-%23aac9ff.svg)](https://pharo.org/download)
+
 The Claude SDK for Pharo provides access to the [Claude API](https://docs.anthropic.com/en/api/) from Pharo applications.
 Send messages, stream responses, use tools, upload files, and access the
 full Claude API surface — all from a live Pharo 12 image.

@@ -1,0 +1,82 @@
+name: Lint
+
+# Renraku lint for the Messaging SDK packages. Runs headlessly in a fresh
+# Pharo 12 image. Fails on any non-`clean` line — class-level rules
+# included (per-method `m critiques` would miss them).
+#
+# Triggers:
+#   - push to main
+#   - pull_request to main
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Job name 'lint' is the status check context. Do NOT add `name:` —
+  # an override changes the reported context and breaks any required-
+  # status-check rule pointing at "lint".
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Build image + load SDK packages
+        run: make setup
+
+      - name: Run Renraku lint headlessly
+        shell: bash
+        run: |
+          set -o pipefail
+          # Match the discipline of `make lint` but headless: load the same
+          # SDK class filter, run ReCriticEngine per class, emit one line
+          # per finding (or "ClassName: clean") to stdout. The shell-side
+          # grep at the bottom enforces zero non-clean lines.
+          ./pharo/pharo --headless ./pharo/Pharo.image eval "
+            | classes results out |
+            classes := Smalltalk globals allClasses select: [ :c |
+              (c package name beginsWith: 'Claude-Messaging-') or: [
+                c package name beginsWith: 'PharoKeyring' ] ].
+            results := OrderedCollection new.
+            classes do: [ :cls |
+              | findings |
+              findings := OrderedCollection new.
+              [ (ReCriticEngine critiquesOf: cls) do: [ :c |
+                | entity |
+                entity := c sourceAnchor entity.
+                (entity isKindOf: CompiledMethod)
+                  ifTrue: [ findings add: (entity methodClass instanceSide name, ' >> #', entity selector, ': ', c rule name) ]
+                  ifFalse: [ findings add: (cls name, ': ', c rule name) ] ] ]
+                on: Error do: [ :e | findings add: (cls name, ': ERROR ', e messageText) ].
+              findings ifEmpty: [ results add: cls name, ': clean' ]
+                ifNotEmpty: [ results addAll: findings ] ].
+            out := Stdio stdout.
+            results do: [ :line | out nextPutAll: line; lf ].
+            out flush.
+            Smalltalk exitSuccess
+          " 2>&1 | tee lint.log
+          pharo_rc=${PIPESTATUS[0]}
+          if [ "${pharo_rc}" -ne 0 ]; then
+            echo "lint: pharo exited non-zero"
+            exit 1
+          fi
+          DIRTY=$(grep -v ': clean$' lint.log | grep -v '^$' || true)
+          if [ -n "${DIRTY}" ]; then
+            echo "lint: findings present"
+            echo "${DIRTY}"
+            exit 1
+          fi
+          echo "lint: 0 findings"
