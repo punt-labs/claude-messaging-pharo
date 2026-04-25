@@ -1,7 +1,13 @@
 "
-Integration tests for server-side tool support. Requires a live API key in PharoKeyring. Excluded from make test by naming convention (IntegrationTest).
+Integration tests for server-side tool support. Resolves the API key via
+``ClaudeSDKExampleSupport resolveClient`` (OS keyring first, ``ANTHROPIC_API_KEY``
+env var second). When neither is present, ``setUp`` skips cleanly via ``self skip:``
+rather than failing -- a key-less image (CI fork PR, fresh dev box) is not a red.
 
-Tests are parameterized across models (opus46, sonnet46) for multi-model coverage. Each server tool has one test per model, with shared helper methods for the common assertion logic.
+These tests are excluded from ``make test``; they run via ``ClaudeMessagingTestSuite
+fullSuite`` in the slow-suite workflow. Tests are parameterized across models
+(opus46, sonnet46) for multi-model coverage. Each server tool has one test per model,
+with shared helper methods for the common assertion logic.
 
 Run manually when validating server tool end-to-end behavior:
 
@@ -132,12 +138,12 @@ ClaudeServerToolIntegrationTest >> defaultTimeLimit [
 
 { #category : 'running' }
 ClaudeServerToolIntegrationTest >> setUp [
-  | key |
+  "Resolve a ClaudeClient via the shared keyring/env-var fallback chain. Skips
+  cleanly when no key is available so a key-less image (CI fork PR, fresh dev
+  box) does not red-fail the suite."
   super setUp.
-  key := [ PharoKeyring default lookup: 'anthropic-api' account: 'default' ]
-    on: Error do: [ :e | nil ].
-  self assert: key isNotNil description: 'No API key -- set anthropic-api-key in PharoKeyring'.
-  client := ClaudeClient apiKey: key
+  [ client := ClaudeSDKExampleSupport resolveClient ]
+    on: Error do: [ :e | ^ self skip: e messageText ]
 ]
 
 { #category : 'tests-integration' }

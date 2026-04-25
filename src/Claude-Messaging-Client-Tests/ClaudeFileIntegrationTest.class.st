@@ -1,8 +1,12 @@
 "
-Integration tests for the Files API methods on ClaudeClient.
+Integration tests for the Files API methods on ClaudeClient. Resolves the API key via
+``ClaudeSDKExampleSupport resolveClient`` (OS keyring first, ``ANTHROPIC_API_KEY``
+env var second). When neither is present, ``setUp`` skips cleanly via ``self skip:``
+rather than failing -- a key-less image (CI fork PR, fresh dev box) is not a red.
 
-Requires a valid API key in the OS keyring. Each test uploads a temporary
-file and deletes it when done.
+These tests are excluded from ``make test``; they run via ``ClaudeMessagingTestSuite
+fullSuite`` in the slow-suite workflow. Each test uploads a temporary file and deletes
+it when done.
 
   ClaudeFileIntegrationTest buildSuite run
   >>> a TestResult
@@ -18,12 +22,6 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'private' }
-ClaudeFileIntegrationTest >> apiKey [
-	^ [ LibC resultOfCommand: 'secret-tool lookup service pharo anthropic api-key' ]
-		on: Error do: [ :e | nil ]
-]
-
 { #category : 'running' }
 ClaudeFileIntegrationTest >> defaultTimeLimit [
     "Raise the default 10s limit for integration tests — 10 MB upload can take up to a minute over the wire."
@@ -32,13 +30,12 @@ ClaudeFileIntegrationTest >> defaultTimeLimit [
 
 { #category : 'running' }
 ClaudeFileIntegrationTest >> setUp [
-	| key |
+	"Resolve a ClaudeClient via the shared keyring/env-var fallback chain. Skips
+	cleanly when no key is available so a key-less image (CI fork PR, fresh dev
+	box) does not red-fail the suite."
 	super setUp.
-	key := self apiKey.
-	self assert: key isNotNil description: 'No API key available. Integration tests require a live API key.'.
-	key := key trimBoth.
-	self assert: key isNotEmpty description: 'API key is empty. Integration tests require a live API key.'.
-	client := ClaudeClient apiKey: key
+	[ client := ClaudeSDKExampleSupport resolveClient ]
+		on: Error do: [ :e | ^ self skip: e messageText ]
 ]
 
 { #category : 'tests-integration' }
