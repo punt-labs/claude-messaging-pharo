@@ -554,10 +554,72 @@ review:
 
 ## Naming Conventions
 
-- Package naming follows Pharo idiom `Family-SubFamily-Module`:
-  - `Claude-Messaging-*` — Messaging API layer (types, errors,
-    streaming, client, tools, files, MCP, skills, examples)
-- Class names: `Claude` prefix for all SDK types
+### Package naming
+
+Package naming follows the Pharo idiom `Family-SubFamily-Module`.
+This repo ships **two package families**, both addressable from
+the same Metacello baseline:
+
+- **`Claude-Messaging-*`** — Messages API surface and the
+  resources that attach to a Messages request. Existing today.
+  Examples: `Claude-Messaging-Types`, `Claude-Messaging-Client`,
+  `Claude-Messaging-Streaming`, `Claude-Messaging-Files`,
+  `Claude-Messaging-MCP`, `Claude-Messaging-Skills`,
+  `Claude-Messaging-Tools`, `Claude-Messaging-Errors`,
+  `Claude-Messaging-Examples`.
+- **`Claude-ManagedAgents-*`** — Anthropic's Managed Agents API
+  beta resources. New in v0.7+. Examples (planned):
+  `Claude-ManagedAgents-Sessions`,
+  `Claude-ManagedAgents-MemoryStores`,
+  `Claude-ManagedAgents-Agents`,
+  `Claude-ManagedAgents-Environments`,
+  `Claude-ManagedAgents-UserProfiles`,
+  `Claude-ManagedAgents-Vaults`. See ADR-40 in `DESIGN.md`.
+
+Anthropic uses "Managed Agents" in its API documentation; we use
+the same term in prose and `ManagedAgents` (single CamelCase
+token) in package names and code identifiers. See ADR-41.
+
+The local in-image agent runtime in the monorepo
+`claude-agent-sdk-smalltalk` uses a different prefix —
+`Claude-Agent-*` (singular, no `-s`) — for an unrelated concept
+(tool runner, exchange loop, commands). The two prefixes are
+deliberately distinct.
+
+### `ClaudeClient` extension methods
+
+`ClaudeClient` lives in `Claude-Messaging-Client` and is the
+single gateway for every API call. Methods that target Managed
+Agents resources are defined as Pharo extension methods in the
+relevant `Claude-ManagedAgents-*` package, not in the Messaging
+client package itself. See ADR-42.
+
+Extension method category names follow the standard Pharo
+convention: prefix the host package's method category with `*`
+and the defining package name. For example, a `createSession:`
+method added to `ClaudeClient` from the
+`Claude-ManagedAgents-Sessions` package goes in the category
+`*Claude-ManagedAgents-Sessions`. The asterisk-prefix tells the
+System Browser (and any reader) that the method's defining
+package differs from the host class's package.
+
+```smalltalk
+"Defined in Claude-ManagedAgents-Sessions, on the host class
+ ClaudeClient (which lives in Claude-Messaging-Client):"
+ClaudeClient
+  compile: 'createSession: aSessionRequest
+    ^ self post: ''/v1/sessions'' with: aSessionRequest asJson'
+  classified: '*Claude-ManagedAgents-Sessions'.
+```
+
+Selective loading via Metacello groups still works: a consumer
+who loads only the `messaging` group gets `ClaudeClient` with
+only Messages methods; loading `managed-agents` adds the agent
+methods on top.
+
+### Other naming conventions
+
+- Class names: `Claude` prefix for all SDK types.
 - Method names: intention-revealing per Beck. `sendMessage:` not
   `postToMessagesEndpoint:`. `textContent` not
   `collectTextBlocksAndJoin`.
@@ -565,8 +627,8 @@ review:
   Smalltalk (`maxTokens`). Each class implements `jsonKeyMap` for
   the mapping.
 - Protocols: `accessing`, `json`, `tests`, `printing`, `models`,
-  `instance creation`, `converting`, `private`. No `as yet
-  unclassified`.
+  `instance creation`, `converting`, `private`. No
+  `as yet unclassified`.
 
 ## Reference SDK
 

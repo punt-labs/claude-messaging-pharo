@@ -46,26 +46,53 @@ different endpoint family.
 Server-side stateful conversation primitive. Used standalone for
 long-running chats and as a building block for Managed Agents.
 
+Packages: `Claude-ManagedAgents-Sessions`,
+`Claude-ManagedAgents-Sessions-Tests`. Adds extension methods on
+`ClaudeClient` for `createSession:`, `getSession:`,
+`listSessions:`, `deleteSession:`.
+
 ### v0.8.0 — Memory Stores (beta)
 
 Persistent memory resource. Standalone for retrieval-augmented
 workflows; consumed by Managed Agents.
 
+Packages: `Claude-ManagedAgents-MemoryStores`,
+`Claude-ManagedAgents-MemoryStores-Tests`. Adds extension methods
+on `ClaudeClient` for `createMemoryStore:`, `getMemoryStore:`,
+`listMemoryStores:`, `deleteMemoryStore:`.
+
 ### v0.9.0 — Agents (beta)
 
-Claude-Managed Agents — the agentic runtime hosted by Anthropic.
+Managed Agents — the agentic runtime hosted by Anthropic.
 Composes sessions, memory stores, skills, and tools. Depends on v0.7
 and v0.8 having shipped.
+
+Packages: `Claude-ManagedAgents-Agents`,
+`Claude-ManagedAgents-Agents-Tests`. Adds extension methods on
+`ClaudeClient` for `createAgent:`, `getAgent:`, `listAgents:`,
+`updateAgent:`, `deleteAgent:`, plus the agent-run lifecycle
+methods.
 
 ### v0.10.0 — Environments (beta)
 
 Execution environments for Managed Agents: sandbox configuration,
 container settings, network policy.
 
+Packages: `Claude-ManagedAgents-Environments`,
+`Claude-ManagedAgents-Environments-Tests`. Adds extension methods
+on `ClaudeClient` for `createEnvironment:`, `getEnvironment:`,
+`listEnvironments:`, `deleteEnvironment:`.
+
 ### v0.11.0 — User Profiles + Vaults (beta)
 
 `user_profiles` (per-user identity for agents) and `vaults` (secret
 storage). Smaller resources paired into one release.
+
+Packages: `Claude-ManagedAgents-UserProfiles`,
+`Claude-ManagedAgents-UserProfiles-Tests`,
+`Claude-ManagedAgents-Vaults`,
+`Claude-ManagedAgents-Vaults-Tests`. Adds extension methods on
+`ClaudeClient` for the `userProfile` and `vault` CRUD selectors.
 
 ## v1.0.0
 

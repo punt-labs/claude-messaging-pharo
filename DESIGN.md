@@ -360,3 +360,160 @@ the citations list. Two sources of truth; easy to get out of sync.
 **Consequences:** `enableCitations` populates the slot;
 `disableCitations` sets it to nil. JSON serialization naturally
 omits the field when disabled.
+
+---
+
+## ADR-40 — Two package families: `Claude-Messaging-*` + `Claude-ManagedAgents-*`
+
+**Status:** ACCEPTED
+
+**Context:** anthropic-sdk-pharo's v0.5.0 ships only the Messages
+API surface, organized under the `Claude-Messaging-*` package
+prefix. The ROADMAP commits to adding Anthropic's Managed Agents
+API beta resources — sessions, memory_stores, agents,
+environments, user_profiles, vaults — on the path to v1.0 parity
+with `anthropic-sdk-python` (which exposes them under
+`beta/sessions/`, `beta/memory_stores/`, `beta/agents/`,
+`beta/environments.py`, `beta/user_profiles.py`, `beta/vaults/`).
+The question is whether those resources go under the existing
+`Claude-Messaging-*` prefix or a new prefix.
+
+**Decision:** Use a new prefix, `Claude-ManagedAgents-*`. The two
+families remain in the same Pharo image and same Metacello
+baseline; they are addressable as separate package surfaces.
+
+**Rationale:** The existing `Claude-Messaging-*` packages are
+legitimately Messages-API-specific or Messages-request-adjacent —
+Files referenced via `file_id` in messages, Skills via `skill_id`,
+MCP via the `mcp_servers` field, server tools via the `tools`
+array. The Managed Agents resources are an orthogonal API
+surface: their own request and response types, their own
+endpoints, their own beta header. Forcing them under
+`Claude-Messaging-*` would mean naming the Sessions package
+`Claude-Messaging-Sessions`, which reads wrong (a session is not
+a message) and conflates two distinct API families.
+
+**Rejected alternatives:**
+
+- **Single prefix `Claude-API-*` for everything**: would require
+  renaming all nine existing `Claude-Messaging-*` packages. High
+  mechanical cost; loses the Messages-specific signal in the
+  existing prefix.
+- **Single prefix `Claude-Messaging-*` extended**: would name the
+  Sessions package `Claude-Messaging-Sessions`, which
+  misrepresents what a session is.
+- **Per-resource prefixes** (`Claude-Sessions-*`,
+  `Claude-Agents-*`, `Claude-MemoryStores-*`): too fragmented;
+  one resource per family obscures the relationship between
+  resources that compose into the same API surface.
+
+**Consequences:** Consumers loading the SDK via Metacello get
+both families. Selective loading is possible via Metacello groups
+in `BaselineOfClaudeMessaging` — group `messaging` for the
+v0.5/v0.6 surface, group `managed-agents` for the v0.7+ surface,
+group `default` for everything. (This is forward policy for the
+v0.7 work and the baseline rename in bead 0cd; no group changes
+in this PR.) Tests organize the same way:
+`Claude-ManagedAgents-Sessions-Tests`,
+`ClaudeManagedAgentsTestSuite`, etc.
+
+---
+
+## ADR-41 — `ManagedAgents` over `Agents` or `RemoteAgents`
+
+**Status:** ACCEPTED
+
+**Context:** Anthropic's documentation and Python SDK refer to
+this resource family as "Managed Agents" in formal prose and
+"agents" in path and code (`beta/agents/`). Punt Labs' monorepo
+`claude-agent-sdk-smalltalk` already has `Claude-Agent-*`
+packages — singular, no `-s` — for the IN-IMAGE local agent
+runtime (`Claude-Agent-Exchange`, `Claude-Agent-Commands`, etc.).
+The naming choice for the Anthropic-hosted resources affects
+clarity for both readers and tooling.
+
+**Decision:** Use `ManagedAgents` (CamelCase, single token) as
+the package-name fragment and "Managed Agents" as the prose form.
+
+**Rationale:** Aligns with Anthropic's formal vocabulary; clearly
+distinguishes from the local `Claude-Agent-*` runtime in the
+monorepo (which runs tools inside the user's image); the explicit
+"Managed" qualifier communicates that these agents run on
+Anthropic's infrastructure, not in the user's image.
+
+**Rejected alternatives:**
+
+- **`Agents`** (matches the Python SDK path): collides with the
+  monorepo's `Claude-Agent-*` semantically — readers would
+  conflate the two. Different concepts deserve different names.
+- **`RemoteAgents`**: descriptively accurate but invents
+  vocabulary that does not appear in Anthropic's docs. Inventing
+  a synonym creates a translation layer between Anthropic's prose
+  and ours.
+- **`BetaAgents`**: tied to the beta status, which will change
+  when the API graduates. Naming by stability is a moving target;
+  every package would need a rename when the resource leaves
+  beta.
+
+**Consequences:** Every package in the new family carries the
+`Claude-ManagedAgents-` prefix. CLAUDE.md and ROADMAP.md use the
+term "Managed Agents" in prose; "ManagedAgents" in code
+identifiers, package names, and class-name fragments.
+
+---
+
+## ADR-42 — `ClaudeClient` gateway with extension methods per family
+
+**Status:** ACCEPTED
+
+**Context:** `ClaudeClient` lives in `Claude-Messaging-Client`
+and is the single gateway for every API call: `sendMessage:`,
+`streamMessage:do:`, `countTokens:`, `uploadFile:`, `listSkills`,
+and so on. v0.7+ adds Managed Agents methods (`createAgent:`,
+`getSession:`, `createSession:`, `listSessions:`, etc.). The
+question is whether `ClaudeClient` migrates to a new core
+package, gets split into multiple client classes, or stays where
+it is and grows via Pharo extension methods.
+
+**Decision:** `ClaudeClient` stays in `Claude-Messaging-Client`.
+New Managed-Agents methods are Pharo extension methods defined
+in `Claude-ManagedAgents-*` packages. The method category
+convention is `*Claude-ManagedAgents-Sessions` (the asterisk
+prefix marks an extension whose defining package differs from
+the host class's package).
+
+**Rationale:** Single-gateway is the existing pattern and matches
+`anthropic-sdk-python`'s `Anthropic` class, which exposes every
+resource family. Pharo extension methods are first-class:
+`BaselineOfClaudeMessaging` loads `Claude-Messaging-Client`
+first, then any `Claude-ManagedAgents-*` package that needs to
+extend `ClaudeClient` loads its extension methods on top. No
+race, no inheritance hack. Selective loading still works — a
+consumer who loads only the `messaging` group gets
+`ClaudeClient` with only Messages methods; loading
+`managed-agents` adds the agent methods.
+
+**Rejected alternatives:**
+
+- **Separate `ClaudeManagedAgentsClient` class**: would force
+  consumers to instantiate two clients with the same API key.
+  Unnatural and does not match `anthropic-sdk-python`. Doubles
+  the configuration surface for no gain.
+- **Move `ClaudeClient` to a new `Claude-Core-Client` package**:
+  large rename for no semantic gain. `ClaudeClient`
+  legitimately belongs to the Messaging family today; moving it
+  would invent a "Core" layer that does not yet exist.
+- **Subclassing**: `ClaudeManagedAgentsClient` as a subclass of
+  `ClaudeClient`. Pharo's class hierarchy is per-image; a
+  subclass adds nothing over extension methods and forces a
+  choice at instantiation time that does not need to exist.
+
+**Consequences:** The extension method category convention
+enforces package-of-origin clarity — the System Browser shows
+`*Claude-ManagedAgents-Sessions` so readers know the methods
+come from a different package than the host class. Tests for
+those extension methods live in the defining package's `-Tests`
+package (`Claude-ManagedAgents-Sessions-Tests`), not in
+`Claude-Messaging-Client-Tests`. The host class's package can
+be loaded without the extensions; the extensions cannot be
+loaded without the host class.
