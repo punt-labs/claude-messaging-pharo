@@ -407,14 +407,16 @@ a message) and conflates two distinct API families.
   one resource per family obscures the relationship between
   resources that compose into the same API surface.
 
-**Consequences:** Consumers loading the SDK via Metacello get
-both families. Selective loading is possible via Metacello groups
-in `BaselineOfClaudeMessaging` — group `messaging` for the
-v0.5/v0.6 surface, group `managed-agents` for the v0.7+ surface,
-group `default` for everything. (This is forward policy for the
-v0.7 work and the baseline rename in bead 0cd; no group changes
-in this PR.) Tests organize the same way:
-`Claude-ManagedAgents-Sessions-Tests`,
+**Consequences:** Consumers loading the SDK via Metacello today
+receive both families together — `BaselineOfClaudeMessaging`
+ships no groups and no tiers. Selective loading via Metacello
+groups (`messaging` for the v0.5/v0.6 surface, `managed-agents`
+for the v0.7+ surface, `default` for everything) is planned for
+the v0.7 baseline rename work tracked in bead
+`claude-messaging-pharo-0cd`; when introduced, those groups will
+partition the load surface so a consumer can pull in just the
+Messaging family or just the Managed Agents family. Tests
+organize the same way: `Claude-ManagedAgents-Sessions-Tests`,
 `ClaudeManagedAgentsTestSuite`, etc.
 
 ---

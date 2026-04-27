@@ -595,13 +595,15 @@ relevant `Claude-ManagedAgents-*` package, not in the Messaging
 client package itself. See ADR-42.
 
 Extension method category names follow the standard Pharo
-convention: prefix the host package's method category with `*`
-and the defining package name. For example, a `createSession:`
-method added to `ClaudeClient` from the
-`Claude-ManagedAgents-Sessions` package goes in the category
-`*Claude-ManagedAgents-Sessions`. The asterisk-prefix tells the
-System Browser (and any reader) that the method's defining
-package differs from the host class's package.
+convention: the category is `*` followed by the defining
+package's name verbatim. For example, a `createSession:` method
+added to `ClaudeClient` from the `Claude-ManagedAgents-Sessions`
+package gets the category `*Claude-ManagedAgents-Sessions`. The
+asterisk-prefix tells the System Browser (and any reader) that
+the method's defining package differs from the host class's
+package. The Messaging layer already follows this pattern — see
+`src/Claude-Messaging-Tools/ClaudeMessageRequest.extension.st`,
+where every method carries `{ #category : '*Claude-Messaging-Tools' }`.
 
 ```smalltalk
 "Defined in Claude-ManagedAgents-Sessions, on the host class
@@ -612,10 +614,14 @@ ClaudeClient
   classified: '*Claude-ManagedAgents-Sessions'.
 ```
 
-Selective loading via Metacello groups still works: a consumer
-who loads only the `messaging` group gets `ClaudeClient` with
-only Messages methods; loading `managed-agents` adds the agent
-methods on top.
+Selective loading is planned for the v0.7 baseline rename work
+(bead `claude-messaging-pharo-0cd`): when Metacello groups
+`messaging`, `managed-agents`, and `default` are introduced, a
+consumer loading only the `messaging` group will get
+`ClaudeClient` with only Messages methods; loading
+`managed-agents` will add the agent methods on top. Today
+`BaselineOfClaudeMessaging` ships no groups, so consumers
+receive both families together.
 
 ### Other naming conventions
 
