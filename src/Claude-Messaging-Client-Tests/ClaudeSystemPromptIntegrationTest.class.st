@@ -66,7 +66,7 @@ ClaudeSystemPromptIntegrationTest >> testSystemPromptConstraintsResponseAgainstA
 	 proof that the system prompt reached the model and was respected.
 	 Skips cleanly when no API key is present."
 	| client response text |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingSystemPromptExample runOn: client.
 	text := response textContent.

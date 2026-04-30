@@ -78,7 +78,7 @@ ClaudeCitationsIntegrationTest >> testCitationsReturnedAgainstAnthropic [
 	 are stateless on our side."
 
 	| client response textBlocksWithCitations firstCitation |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingCitationsExample runOn: client.
 	textBlocksWithCitations := response content select: [ :b |

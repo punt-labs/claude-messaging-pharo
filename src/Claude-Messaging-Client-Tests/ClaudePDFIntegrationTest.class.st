@@ -79,7 +79,7 @@ ClaudePDFIntegrationTest >> testPDFInputProcessedAgainstAnthropic [
 	 is stateless on our side."
 
 	| client response |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingPDFExample runOn: client.
 	self

@@ -50,12 +50,14 @@ ClaudeDocumentSourceTest >> testBase64SourceFromJson [
 
 { #category : 'tests' }
 ClaudeDocumentSourceTest >> testContentSourceAsJson [
-  | src json |
-  src := ClaudeContentDocumentSource new.
-  src content add: (ClaudeContentBlock fromJson: (Dictionary newFromPairs: { 'type'. 'text'. 'text'. 'hello' })).
-  json := src asJson.
-  self assert: (json at: 'type') equals: 'content'.
-  self assert: (json at: 'content') size equals: 1
+	| src json blocks |
+	src := ClaudeContentDocumentSource new.
+	blocks := OrderedCollection new.
+	blocks add: (ClaudeContentBlock fromJson: (Dictionary newFromPairs: { 'type'. 'text'. 'text'. 'hello' })).
+	src content: blocks.
+	json := src asJson.
+	self assert: (json at: 'type') equals: 'content'.
+	self assert: (json at: 'content') size equals: 1
 ]
 
 { #category : 'tests' }

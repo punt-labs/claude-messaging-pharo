@@ -137,7 +137,9 @@ ClaudeFileIntegrationTest >> testUploadStreamsLargeFileWithBoundedMemory [
       self assert: metadata id isNotNil
     ] ensure: [
         (metadata notNil and: [metadata id notNil]) ifTrue: [
-            [client deleteFile: metadata id] on: Error do: [:e | ]].
+            [ client deleteFile: metadata id ]
+				on: Error
+				do: [ :ignored | "best-effort cleanup; ignore deletion failures so the local temp file is still removed below" nil ]].
         tempFile exists ifTrue: [tempFile delete]]
 ]
 

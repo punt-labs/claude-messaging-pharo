@@ -50,7 +50,7 @@ ClaudeRequestOptionsIntegrationTest >> testRequestOptionsFieldsClearServerValida
 	 response usage serviceTier = 'auto'.
 	 Skips cleanly when no API key is present."
 	| client response |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingRequestOptionsExample runOn: client.
 	self

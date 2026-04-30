@@ -78,7 +78,7 @@ ClaudeThinkingIntegrationTest >> testThinkingBlockReturnedAgainstAnthropic [
 	 polymorphic isThinkingBlock predicate rather than isKindOf:."
 
 	| client response thinkingBlocks first |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingThinkingExample runOn: client.
 	thinkingBlocks := response content select: [ :b | b isThinkingBlock ].

@@ -49,7 +49,7 @@ ClaudeGetModelIntegrationTest >> testGetModelReturnsModelInfoForKnownId [
 	 with the rest of the examples.
 	 Skips cleanly when no API key is present."
 	| client modelId info |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	modelId := ClaudeModel sonnet46.
 	info := client getModel: modelId.

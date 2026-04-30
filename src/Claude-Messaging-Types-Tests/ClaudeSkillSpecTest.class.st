@@ -23,7 +23,7 @@ ClaudeSkillSpecTest >> testAsJsonRequiresSkillIdAndType [
 	spec skillId: 'sk_abc'.
 	self should: [ spec asJson ] raise: Error.
 	spec type: 'custom'.
-	self shouldnt: [ spec asJson ] raise: Error
+	spec asJson "must not raise once both required fields are populated"
 ]
 
 { #category : 'tests' }

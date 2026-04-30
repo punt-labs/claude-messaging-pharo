@@ -50,6 +50,7 @@ ClaudeBatchClientTest >> setUp [
 	 via the mock server's port accessor. Avoids hardcoded port ranges, port
 	 collisions across parallel test runs, and same-port reuse races. The OS
 	 only hands back a port that's actually free at start time."
+	super setUp.
 	server := ClaudeMockServer startOn: 0.
 	port := server port.
 	client := ClaudeClient apiKey: 'test-key'.
@@ -61,7 +62,8 @@ ClaudeBatchClientTest >> setUp [
 ClaudeBatchClientTest >> tearDown [
 	"Stop the mock server. The OS-assigned port from setUp is released
 	 immediately on stop; no manual delay needed."
-	server ifNotNil: [ server stop. server := nil ]
+	server ifNotNil: [ server stop. server := nil ].
+	super tearDown
 ]
 
 { #category : 'tests' }
@@ -182,7 +184,7 @@ ClaudeBatchClientTest >> testStreamBatchResultsNoCallbackBeforeFullParse [
 	 to parse, no entries are yielded and no partial collection is returned.
 	 This is the property that prevents duplication on executeWithRetry: --
 	 partial work from a failed attempt is structurally impossible."
-	| jsonl line1 line2 badLine yielded |
+	| jsonl line1 line2 badLine yielded raised |
 	server respondTo: 'v1/messages/batches/batch-abc' with: self sampleEndedBatchJson.
 	line1 := STONJSON toString: (Dictionary newFromPairs: {
 		'custom_id'. 'r-1'.
@@ -194,8 +196,10 @@ ClaudeBatchClientTest >> testStreamBatchResultsNoCallbackBeforeFullParse [
 	jsonl := line1 , String lf , line2 , String lf , badLine , String lf.
 	server respondTo: 'v1/messages/batches/batch-abc/results' with: jsonl.
 	yielded := OrderedCollection new.
+	raised := nil.
 	[ client streamBatchResults: 'batch-abc' do: [ :entry | yielded add: entry ] ]
-		on: Error do: [ :e | "expected -- bad JSON in last line" ].
+		on: Error do: [ :e | raised := e ].
+	self assert: raised isNotNil description: 'streamBatchResults must raise on bad JSON in the response body'.
 	self assert: yielded size equals: 0
 ]
 

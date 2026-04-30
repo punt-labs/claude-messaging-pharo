@@ -81,7 +81,7 @@ ClaudePromptCachingIntegrationTest >> testPromptCachingCacheCreationAndReadCycle
 	 entries expire on their own and the client creates no named resources."
 
 	| client pair first second |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	pair := ClaudeMessagingPromptCachingExample runTwiceOn: client.
 	first := pair first.

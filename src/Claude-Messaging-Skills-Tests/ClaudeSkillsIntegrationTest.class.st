@@ -72,7 +72,7 @@ ClaudeSkillsIntegrationTest >> testSkillRoundTripAgainstAnthropic [
 	 below already proves server-side persistence of the upload."
 
 	| client skill roundTripped versions |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	skill := ClaudeMessagingSkillsExample uploadOn: client.
 	[

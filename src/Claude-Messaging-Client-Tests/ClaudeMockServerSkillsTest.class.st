@@ -32,14 +32,16 @@ ClaudeMockServerSkillsTest >> newFixtureDirectoryWithMismatchedName [
 	"Fixture whose directory basename deliberately disagrees with the
 	 name: field in SKILL.md. Used to exercise the directory-name
 	 guard in buildStreamingSkillPartsInto:fromDirectory:."
-	| dir |
-	dir := FileLocator temp / ('ism8-skill-fixture-mismatch-', 100000 atRandom printString).
+	| dir lf |
+	lf := String lf.
+	dir := FileLocator temp / ('ism8-skill-fixture-mismatch-' , 100000 atRandom printString).
 	dir createDirectory.
 	(dir / 'SKILL.md') writeStreamDo: [ :s |
-		s nextPutAll: '---', String lf,
-			'name: intentionally-different-name', String lf,
-			'---', String lf,
-			'# Body' ].
+		s
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: 'name: intentionally-different-name'; nextPutAll: lf;
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: '# Body' ].
 	(dir / 'helper.py') writeStreamDo: [ :s | s nextPutAll: 'print(1)' ].
 	fixtureDirs add: dir.
 	^ dir
@@ -53,14 +55,16 @@ ClaudeMockServerSkillsTest >> newFixtureDirectoryWithNestedFile [
 	 frontmatter name: field matching the directory basename so the
 	 directory-name guard in buildStreamingSkillPartsInto:fromDirectory:
 	 does not fire."
-	| dir |
-	dir := FileLocator temp / ('ism8-skill-fixture-nested-', 100000 atRandom printString).
+	| dir lf |
+	lf := String lf.
+	dir := FileLocator temp / ('ism8-skill-fixture-nested-' , 100000 atRandom printString).
 	dir createDirectory.
 	(dir / 'SKILL.md') writeStreamDo: [ :s |
-		s nextPutAll: '---', String lf,
-			'name: ', dir basename, String lf,
-			'---', String lf,
-			'# My Skill' ].
+		s
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: 'name: '; nextPutAll: dir basename; nextPutAll: lf;
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: '# My Skill' ].
 	(dir / 'helpers') createDirectory.
 	(dir / 'helpers' / 'util.py') writeStreamDo: [ :s | s nextPutAll: 'print(2)' ].
 	fixtureDirs add: dir.
@@ -74,14 +78,16 @@ ClaudeMockServerSkillsTest >> newFixtureDirectoryWithOversizedFile [
 	 before the multipart body is built. SKILL.md includes a YAML
 	 frontmatter name: field matching the directory basename so the
 	 directory-name guard does not fire first."
-	| dir bytes |
-	dir := FileLocator temp / ('ism8-skill-fixture-oversized-', 100000 atRandom printString).
+	| dir bytes lf |
+	lf := String lf.
+	dir := FileLocator temp / ('ism8-skill-fixture-oversized-' , 100000 atRandom printString).
 	dir createDirectory.
 	(dir / 'SKILL.md') writeStreamDo: [ :s |
-		s nextPutAll: '---', String lf,
-			'name: ', dir basename, String lf,
-			'---', String lf,
-			'# My Skill' ].
+		s
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: 'name: '; nextPutAll: dir basename; nextPutAll: lf;
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: '# My Skill' ].
 	bytes := ByteArray new: 26 * 1024 * 1024 withAll: 65.
 	(dir / 'huge.bin') binaryWriteStreamDo: [ :s | s nextPutAll: bytes ].
 	fixtureDirs add: dir.
@@ -94,14 +100,16 @@ ClaudeMockServerSkillsTest >> newFixtureDirectoryWithSkillMd [
 	 includes a YAML frontmatter name: field matching the directory
 	 basename so the directory-name guard in
 	 buildStreamingSkillPartsInto:fromDirectory: does not fire."
-	| dir |
-	dir := FileLocator temp / ('ism8-skill-fixture-', 100000 atRandom printString).
+	| dir lf |
+	lf := String lf.
+	dir := FileLocator temp / ('ism8-skill-fixture-' , 100000 atRandom printString).
 	dir createDirectory.
 	(dir / 'SKILL.md') writeStreamDo: [ :s |
-		s nextPutAll: '---', String lf,
-			'name: ', dir basename, String lf,
-			'---', String lf,
-			'# My Skill' ].
+		s
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: 'name: '; nextPutAll: dir basename; nextPutAll: lf;
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: '# My Skill' ].
 	(dir / 'helper.py') writeStreamDo: [ :s | s nextPutAll: 'print(1)' ].
 	fixtureDirs add: dir.
 	^ dir
@@ -285,16 +293,18 @@ ClaudeMockServerSkillsTest >> testSkillNameFrontmatterColonOnlyLineReturnsNil [
 	 instead of slicing past the end of the string. Regression for a
 	 Copilot finding on unguarded copyFrom: when the line is shorter
 	 than the 'name: ' prefix."
-	| dir ref result |
-	dir := FileLocator temp / ('ism8-frontmatter-colon-', 100000 atRandom printString).
+	| dir ref result lf |
+	lf := String lf.
+	dir := FileLocator temp / ('ism8-frontmatter-colon-' , 100000 atRandom printString).
 	fixtureDirs add: dir.
 	dir createDirectory.
 	ref := dir / 'SKILL.md'.
 	ref writeStreamDo: [ :s |
-		s nextPutAll: '---', String lf,
-			'name:', String lf,
-			'---', String lf,
-			'# Body' ].
+		s
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: 'name:'; nextPutAll: lf;
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: '# Body' ].
 	result := client skillNameFromFrontmatterAt: ref.
 	self assert: result isNil
 		description: 'name: with no value (5-char line) must return nil, not crash'
@@ -305,16 +315,18 @@ ClaudeMockServerSkillsTest >> testSkillNameFrontmatterEmptyValueReturnsNil [
 	"A 'name:   ' line whose value is only whitespace must return nil
 	 rather than the empty string. An empty name is never a valid
 	 skill name and would defeat the directory-name guard."
-	| dir ref result |
-	dir := FileLocator temp / ('ism8-frontmatter-empty-', 100000 atRandom printString).
+	| dir ref result lf |
+	lf := String lf.
+	dir := FileLocator temp / ('ism8-frontmatter-empty-' , 100000 atRandom printString).
 	fixtureDirs add: dir.
 	dir createDirectory.
 	ref := dir / 'SKILL.md'.
 	ref writeStreamDo: [ :s |
-		s nextPutAll: '---', String lf,
-			'name:    ', String lf,
-			'---', String lf,
-			'# Body' ].
+		s
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: 'name:    '; nextPutAll: lf;
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: '# Body' ].
 	result := client skillNameFromFrontmatterAt: ref.
 	self assert: result isNil
 		description: 'name: with only whitespace value must return nil'
@@ -327,20 +339,24 @@ ClaudeMockServerSkillsTest >> testSkillNameFrontmatterLoneQuoteDoesNotCrash [
 	 lone quote is preserved as content so the caller sees the raw
 	 oddity rather than a silently truncated name. Regression for a
 	 Copilot finding on unguarded quote stripping with value size < 2."
-	| dir ref result |
-	dir := FileLocator temp / ('ism8-frontmatter-lone-quote-', 100000 atRandom printString).
+	| dir ref result lf |
+	lf := String lf.
+	dir := FileLocator temp / ('ism8-frontmatter-lone-quote-' , 100000 atRandom printString).
 	fixtureDirs add: dir.
 	dir createDirectory.
 	ref := dir / 'SKILL.md'.
 	ref writeStreamDo: [ :s |
-		s nextPutAll: '---', String lf,
-			'name: "', String lf,
-			'---', String lf,
-			'# Body' ].
+		s
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: 'name: "'; nextPutAll: lf;
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: '# Body' ].
 	result := client skillNameFromFrontmatterAt: ref.
 	self
 		assert: result = '"'
-		description: 'lone quote must be preserved as content (size 1), not stripped to empty; got: ', result printString
+		description: (String streamContents: [ :s |
+			s nextPutAll: 'lone quote must be preserved as content (size 1), not stripped to empty; got: '.
+			s nextPutAll: result printString ])
 ]
 
 { #category : 'tests' }
@@ -451,9 +467,12 @@ ClaudeMockServerSkillsTest >> testUploadDirectorySendsMultipart [
 	 directory basename followed by /. The server requires that
 	 uploaded files live under a single top-level folder named
 	 after the skill."
-	| dir entityType parts filesParts names dirName firstPart |
+	| dir entityType parts filesParts names dirName prefix firstPart skillMdName helperName |
 	dir := self newFixtureDirectoryWithSkillMd.
 	dirName := dir basename.
+	prefix := dirName , '/'.
+	skillMdName := prefix , 'SKILL.md'.
+	helperName := prefix , 'helper.py'.
 	mockServer respondTo: '/v1/skills' with: self skillResponseJson.
 	client uploadDirectory: dir displayTitle: nil.
 	entityType := mockServer lastRequest entity contentType printString.
@@ -463,16 +482,18 @@ ClaudeMockServerSkillsTest >> testUploadDirectorySendsMultipart [
 	filesParts := parts select: [ :p | p fieldName = 'files[]' ].
 	self assert: filesParts size equals: 2.
 	names := (filesParts collect: [ :p | p fileName ]) asArray.
-	self assert: (names includes: dirName, '/SKILL.md')
+	self assert: (names includes: skillMdName)
 		description: 'SKILL.md must be sent as <dir>/SKILL.md (server requires top-level folder)'.
-	self assert: (names includes: dirName, '/helper.py')
+	self assert: (names includes: helperName)
 		description: 'helper.py must be sent as <dir>/helper.py under the basename prefix'.
-	self assert: (names allSatisfy: [ :n | n beginsWith: dirName, '/' ])
+	self assert: (names allSatisfy: [ :n | n beginsWith: prefix ])
 		description: 'every filename MUST be prefixed with the upload directory basename followed by /'.
 	firstPart := filesParts first.
 	self
 		assert: firstPart fieldName = 'files[]'
-		description: 'multipart field name is the literal string files[] (brackets required by Skills API); got: ', firstPart fieldName printString
+		description: (String streamContents: [ :s |
+			s nextPutAll: 'multipart field name is the literal string files[] (brackets required by Skills API); got: '.
+			s nextPutAll: firstPart fieldName printString ])
 ]
 
 { #category : 'tests' }
@@ -491,9 +512,12 @@ ClaudeMockServerSkillsTest >> testUploadVersionSendsMultipart [
 	"Verifies the multipart envelope plus the literal 'files[]' field
 	 name and the basename-prefixed filenames, same contract as
 	 testUploadDirectorySendsMultipart."
-	| dir entityType parts filesParts names dirName firstPart |
+	| dir entityType parts filesParts names dirName prefix firstPart skillMdName helperName |
 	dir := self newFixtureDirectoryWithSkillMd.
 	dirName := dir basename.
+	prefix := dirName , '/'.
+	skillMdName := prefix , 'SKILL.md'.
+	helperName := prefix , 'helper.py'.
 	mockServer respondTo: '/v1/skills/sk_abc/versions' with: self versionResponseJson.
 	client uploadVersionFor: 'sk_abc' fromDirectory: dir.
 	entityType := mockServer lastRequest entity contentType printString.
@@ -503,16 +527,18 @@ ClaudeMockServerSkillsTest >> testUploadVersionSendsMultipart [
 	filesParts := parts select: [ :p | p fieldName = 'files[]' ].
 	self assert: filesParts size equals: 2.
 	names := (filesParts collect: [ :p | p fileName ]) asArray.
-	self assert: (names includes: dirName, '/SKILL.md')
+	self assert: (names includes: skillMdName)
 		description: 'SKILL.md must be sent as <dir>/SKILL.md (server requires top-level folder)'.
-	self assert: (names includes: dirName, '/helper.py')
+	self assert: (names includes: helperName)
 		description: 'helper.py must be sent as <dir>/helper.py under the basename prefix'.
-	self assert: (names allSatisfy: [ :n | n beginsWith: dirName, '/' ])
+	self assert: (names allSatisfy: [ :n | n beginsWith: prefix ])
 		description: 'every filename MUST be prefixed with the upload directory basename followed by /'.
 	firstPart := filesParts first.
 	self
 		assert: firstPart fieldName = 'files[]'
-		description: 'multipart field name is the literal string files[] (brackets required by Skills API); got: ', firstPart fieldName printString
+		description: (String streamContents: [ :s |
+			s nextPutAll: 'multipart field name is the literal string files[] (brackets required by Skills API); got: '.
+			s nextPutAll: firstPart fieldName printString ])
 ]
 
 { #category : 'tests' }

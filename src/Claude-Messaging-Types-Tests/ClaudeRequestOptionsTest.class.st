@@ -90,9 +90,10 @@ ClaudeRequestOptionsTest >> testContainerValidatesType [
 	opts := ClaudeRequestOptions new.
 	self should: [ opts container: 42 ] raise: Error.
 	self should: [ opts container: (Dictionary new) ] raise: Error.
-	self shouldnt: [ opts container: 'ctr_abc' ] raise: Error.
-	self shouldnt: [ opts container: (ClaudeContainerParams new id: 'ctr') ] raise: Error.
-	self shouldnt: [ opts container: nil ] raise: Error
+	"All three accepted shapes must round-trip without raising:"
+	opts container: 'ctr_abc'.
+	opts container: (ClaudeContainerParams new id: 'ctr').
+	opts container: nil
 ]
 
 { #category : 'tests' }

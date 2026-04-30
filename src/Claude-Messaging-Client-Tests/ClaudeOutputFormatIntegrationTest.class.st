@@ -51,7 +51,7 @@ ClaudeOutputFormatIntegrationTest >> testJsonSchemaOutputFormatProducesConformin
 	 erroring on KeyNotFound.
 	 Skips cleanly when no API key is present."
 	| client response text parsed name age |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingOutputFormatExample runOn: client.
 	text := response textContent.

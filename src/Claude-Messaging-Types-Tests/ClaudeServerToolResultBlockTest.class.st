@@ -93,16 +93,20 @@ ClaudeServerToolResultBlockTest >> testToolSearchResultBlockFromJson [
 
 { #category : 'tests' }
 ClaudeServerToolResultBlockTest >> testTypeRegistryContainsAllNewTypes [
-  | registry newTypes |
-  registry := ClaudeContentBlock typeRegistry.
-  newTypes := #(
-    'bash_code_execution_tool_result'
-    'text_editor_code_execution_tool_result'
-    'tool_search_tool_result'
-    'container_upload'
-    'compaction' ).
-  newTypes do: [ :typeName |
-    self assert: (registry includesKey: typeName) description: 'TypeRegistry missing: ' , typeName ]
+	| registry newTypes |
+	registry := ClaudeContentBlock typeRegistry.
+	newTypes := #(
+		'bash_code_execution_tool_result'
+		'text_editor_code_execution_tool_result'
+		'tool_search_tool_result'
+		'container_upload'
+		'compaction' ).
+	newTypes do: [ :typeName |
+		self
+			assert: (registry includesKey: typeName)
+			description: (String streamContents: [ :s |
+				s nextPutAll: 'TypeRegistry missing: '.
+				s nextPutAll: typeName ]) ]
 ]
 
 { #category : 'tests' }
