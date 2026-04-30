@@ -7,7 +7,43 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Batches API** (`Claude-Messaging-Batches`): the Anthropic Message
+  Batches surface for async submission and JSONL results retrieval.
+  - `ClaudeClient` extension methods (per ADR-42, in
+    `*Claude-Messaging-Batches`): `createBatch:`, `getBatch:`,
+    `listBatches`, `listBatches:`, `cancelBatch:`, `deleteBatch:`,
+    `streamBatchResults:do:`, `pollBatch:untilEndedEvery:`. Private
+    `newBatchHttpClient` injects the
+    `message-batches-2024-09-24` beta header on every request.
+  - 13 new production types: `ClaudeBatch`, `ClaudeBatchPage`,
+    `ClaudeBatchRequest`, `ClaudeBatchCreateParams`,
+    `ClaudeBatchListParams`, `ClaudeBatchRequestCounts`,
+    `ClaudeDeletedBatch`, `ClaudeBatchResult` (polymorphic dispatch
+    via `fromJson:`), four outcome subclasses
+    (`ClaudeBatchSucceededResult`, `ClaudeBatchErroredResult`,
+    `ClaudeBatchCanceledResult`, `ClaudeBatchExpiredResult`), and
+    `ClaudeBatchErrorPayload`.
+  - New error: `ClaudeBatchNotEndedError` (subclass of
+    `ClaudeApiError`) raised by `streamBatchResults:do:` when the
+    batch has not yet reached `processingStatus = 'ended'`.
+  - `ClaudeBetaHeader >> messageBatches` catalog entry returning
+    `'message-batches-2024-09-24'`. `allKnown` now lists 10 betas.
+  - `ManifestClaudeMessagingBatches` declares `ClaudeBatch` a false
+    positive for `ReExcessiveVariablesRule` — its 10 instance
+    variables are wire-mandated by the Anthropic resource shape.
+
 ### Changed
+
+- `ClaudeMockServer >> validateRequest:forPath:` now matches the
+  synchronous Messages endpoint via `endsWith: '/messages'` (and
+  `endsWith: '/messages/count_tokens'`) instead of the prior
+  `includesSubstring: 'messages'`. The previous predicate was
+  overbroad: every Batches path (`/v1/messages/batches`,
+  `/v1/messages/batches/{id}/results`, etc.) tripped the
+  synchronous-Messages validator and rejected legitimate batch
+  payloads with a 400.
 
 - **BREAKING (consumer URL)**: Metacello baseline renamed from
   `ClaudeMessaging` to `ClaudeSDK`. Update consumer load expressions:

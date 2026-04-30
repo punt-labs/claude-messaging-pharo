@@ -305,9 +305,12 @@ ClaudeMockServer >> validateMessagesBody: json [
 
 { #category : 'validation' }
 ClaudeMockServer >> validateRequest: aZnRequest forPath: path [
-	"Validate request body against known endpoint schemas.
-	 Returns a ZnResponse for validation errors, or nil if valid.
-	 Multipart uploads (e.g. Files API, Skills API) bypass JSON parsing entirely."
+	"Validate request body against known endpoint schemas. Returns a ZnResponse
+	 for validation errors, or nil if valid. Multipart uploads (e.g. Files API,
+	 Skills API) bypass JSON parsing entirely. The messages-endpoint check
+	 matches only /v1/messages and /v1/messages/count_tokens — sibling resources
+	 like /v1/messages/batches, /v1/messages/batches/{id}/results have their own
+	 wire shapes and must not trip the synchronous-Messages validator."
 	| json contentType |
 	(aZnRequest method = 'POST') ifFalse: [ ^ nil ].
 	aZnRequest entity ifNil: [ ^ nil ].
@@ -315,9 +318,9 @@ ClaudeMockServer >> validateRequest: aZnRequest forPath: path [
 	(contentType notNil and: [ contentType main = 'multipart' ]) ifTrue: [ ^ nil ].
 	json := [ STONJSON fromString: aZnRequest entity contents ]
 		on: Error do: [ :e | ^ self errorResponse: 400 message: 'Invalid JSON' ].
-	(path includesSubstring: 'count_tokens') ifTrue: [
+	(path endsWith: '/messages/count_tokens') ifTrue: [
 		^ self validateCountTokensBody: json ].
-	(path includesSubstring: 'messages') ifTrue: [
+	(path endsWith: '/messages') ifTrue: [
 		^ self validateMessagesBody: json ].
 	^ nil
 ]

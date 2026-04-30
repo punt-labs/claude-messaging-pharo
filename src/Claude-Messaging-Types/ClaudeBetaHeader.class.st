@@ -55,6 +55,7 @@ ClaudeBetaHeader class >> allKnown [
 		add: self context1m;
 		add: self structuredOutputs;
 		add: self interleavedThinking;
+		add: self messageBatches;
 		yourself
 ]
 
@@ -86,6 +87,12 @@ ClaudeBetaHeader class >> interleavedThinking [
 ClaudeBetaHeader class >> mcpClient [
 	"Wire identifier for the MCP connector beta. Set via ClaudeRequestOptions>>betas: alongside mcpServers:."
 	^ 'mcp-client-2025-04-04'
+]
+
+{ #category : 'betas' }
+ClaudeBetaHeader class >> messageBatches [
+	"Wire identifier for the Message Batches API beta. ClaudeClient injects this on every /v1/messages/batches request via newBatchHttpClient."
+	^ 'message-batches-2024-09-24'
 ]
 
 { #category : 'betas' }

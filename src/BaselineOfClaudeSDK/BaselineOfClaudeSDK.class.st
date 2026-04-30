@@ -1,7 +1,5 @@
 "
-Metacello baseline for the Claude Messaging SDK for Pharo. Loads all 9
-production Messaging packages and PharoKeyring into a Pharo 12 image.
-No groups, no tiers — one baseline:load loads everything.
+Metacello baseline for the Claude Messaging SDK for Pharo. Loads all 10 production Messaging packages and PharoKeyring into a Pharo 12 image. No groups, no tiers — one baseline:load loads everything.
 
 ### Loading from GitHub
 
@@ -21,6 +19,7 @@ No groups, no tiers — one baseline:load loads everything.
 
   ClaudeClient apiKey: 'sk-ant-api03-...'
   >>> a ClaudeClient(https://api.anthropic.com)
+
 
 "
 Class {
@@ -81,6 +80,19 @@ BaselineOfClaudeSDK class >> baseline: spec [
 						'Claude-Messaging-Skills') ];
 				package: 'Claude-Messaging-Client-Tests' with: [
 					spec requires: #('Claude-Messaging-Client') ].
+
+			"Layer 3 — Batches API (extends ClaudeClient via *Claude-Messaging-Batches; loads after Client)"
+			spec
+				package: 'Claude-Messaging-Batches' with: [
+					spec requires: #(
+						'Claude-Messaging-Types'
+						'Claude-Messaging-Errors'
+						'Claude-Messaging-Streaming'
+						'Claude-Messaging-Client') ];
+				package: 'Claude-Messaging-Batches-Tests' with: [
+					spec requires: #(
+						'Claude-Messaging-Batches'
+						'Claude-Messaging-Client-Tests') ].
 
 			"Layer 4 — server tool definitions (extend Types classes; require Client to be present first)"
 			spec
