@@ -125,23 +125,27 @@ ClaudeResponseMetadataTest >> testFromZnHeadersMalformedIntegerSlotsNil [
 
 { #category : 'tests' }
 ClaudeResponseMetadataTest >> testHasRateLimitsAnyRateLimitSlotTrue [
-  "Any single ratelimit slot tips hasRateLimits to true. Verify each."
-  | slots |
-  slots := #(
-    rateLimitRequestsLimit:
-    rateLimitRequestsRemaining:
-    rateLimitRequestsReset:
-    rateLimitInputTokensLimit:
-    rateLimitInputTokensRemaining:
-    rateLimitInputTokensReset:
-    rateLimitOutputTokensLimit:
-    rateLimitOutputTokensRemaining:
-    rateLimitOutputTokensReset:).
-  slots do: [ :sel |
-    | meta |
-    meta := ClaudeResponseMetadata new.
-    meta perform: sel with: 1.
-    self assert: meta hasRateLimits description: 'hasRateLimits should be true after setting ' , sel ]
+	"Any single ratelimit slot tips hasRateLimits to true. Verify each."
+	| slots |
+	slots := #(
+		rateLimitRequestsLimit:
+		rateLimitRequestsRemaining:
+		rateLimitRequestsReset:
+		rateLimitInputTokensLimit:
+		rateLimitInputTokensRemaining:
+		rateLimitInputTokensReset:
+		rateLimitOutputTokensLimit:
+		rateLimitOutputTokensRemaining:
+		rateLimitOutputTokensReset:).
+	slots do: [ :sel |
+		| meta |
+		meta := ClaudeResponseMetadata new.
+		meta perform: sel with: 1.
+		self
+			assert: meta hasRateLimits
+			description: (String streamContents: [ :s |
+				s nextPutAll: 'hasRateLimits should be true after setting '.
+				s nextPutAll: sel ]) ]
 ]
 
 { #category : 'tests' }

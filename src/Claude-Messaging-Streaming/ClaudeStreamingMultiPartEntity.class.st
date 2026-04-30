@@ -45,7 +45,7 @@ Class {
 	#package : 'Claude-Messaging-Streaming'
 }
 
-{ #category : 'accessing' }
+{ #category : 'testing' }
 ClaudeStreamingMultiPartEntity class >> designatedMimeType [
     "Designated MIME type for concreteSubclassForType:binary: lookup. Matches ZnMultiPartFormDataEntity."
     ^ ZnMimeType multiPartFormData

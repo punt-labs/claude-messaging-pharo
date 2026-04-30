@@ -48,7 +48,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeSystemPromptIntegrationTest >> defaultTimeLimit [
 	"One live round-trip to api.anthropic.com plus generation time. The
 	 default 10 s test timeout fires before a healthy round-trip
@@ -66,7 +66,7 @@ ClaudeSystemPromptIntegrationTest >> testSystemPromptConstraintsResponseAgainstA
 	 proof that the system prompt reached the model and was respected.
 	 Skips cleanly when no API key is present."
 	| client response text |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingSystemPromptExample runOn: client.
 	text := response textContent.

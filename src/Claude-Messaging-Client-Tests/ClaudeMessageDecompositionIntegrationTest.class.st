@@ -41,7 +41,7 @@ ClaudeMessageDecompositionIntegrationTest >> buildSimpleRequest [
 	^ req
 ]
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeMessageDecompositionIntegrationTest >> defaultTimeLimit [
 	"One live round-trip to api.anthropic.com per test plus generation time.
 	 2 minutes matches other integration tests in this package."
@@ -63,7 +63,7 @@ ClaudeMessageDecompositionIntegrationTest >> testRequestIdSurvivesRoundTrip [
 	 Server-computed because the client cannot fabricate a request id.
 	 Skips cleanly when no API key is present."
 	| client response |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := client sendMessage: self buildSimpleRequest.
 	self
@@ -91,7 +91,7 @@ ClaudeMessageDecompositionIntegrationTest >> testStopDetailsPopulatedOnNormalEnd
 	 category = #refusal would flake within weeks of release.
 	 Skips cleanly when no API key is present."
 	| client response |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := client sendMessage: self buildSimpleRequest.
 	self

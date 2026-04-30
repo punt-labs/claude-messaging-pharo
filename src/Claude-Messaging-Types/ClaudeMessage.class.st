@@ -52,35 +52,47 @@ ClaudeMessage class >> fromJson: aDictionary [
 		yourself
 ]
 
-{ #category : 'persistence' }
+{ #category : 'instance creation' }
 ClaudeMessage class >> fromSton: stonReader [
-  "Restore from STON. Bridges legacy snapshots written before mission
-   yvyt+pch2: when the embedded ClaudeRequestContext carries a
-   migratedRequestId (rescued by ClaudeRequestContext>>fromSton: from
-   the old #requestId field), promote it onto responseMetadata so the
-   surface API still answers requestId on restore. The transient
-   migratedRequestId is then cleared so it cannot leak into a later
-   re-serialization."
-  | dict ctx restoredMeta |
-  dict := Dictionary new.
-  stonReader parseMapDo: [ :key :value | dict at: key put: value ].
-  ctx := dict at: #requestContext ifAbsent: [ nil ].
-  restoredMeta := dict at: #responseMetadata ifAbsent: [ nil ].
-  (ctx notNil and: [ ctx migratedRequestId notNil ]) ifTrue: [
-    restoredMeta ifNil: [ restoredMeta := ClaudeResponseMetadata new ].
-    restoredMeta requestId
-      ifNil: [ restoredMeta requestId: ctx migratedRequestId ].
-    ctx migratedRequestId: nil ].
-  ^ self new
-    id: (dict at: #id ifAbsent: [ nil ]);
-    type: (dict at: #type ifAbsent: [ nil ]);
-    turn: (dict at: #turn ifAbsent: [ nil ]);
-    usage: (dict at: #usage ifAbsent: [ nil ]);
-    stopDetails: (dict at: #stopDetails ifAbsent: [ nil ]);
-    executionContainer: (dict at: #executionContainer ifAbsent: [ nil ]);
-    requestContext: ctx;
-    responseMetadata: restoredMeta;
-    yourself
+	"Restore from STON. Bridges legacy snapshots written before mission
+	 yvyt+pch2: when the embedded ClaudeRequestContext carries a
+	 migratedRequestId, promote it onto responseMetadata so the surface
+	 API still answers requestId on restore. See
+	 #promoteMigratedRequestIdFrom:onto: for the migration detail."
+	| dict ctx restoredMeta |
+	dict := Dictionary new.
+	stonReader parseMapDo: [ :key :value | dict at: key put: value ].
+	ctx := dict at: #requestContext ifAbsent: [ nil ].
+	restoredMeta := self
+		promoteMigratedRequestIdFrom: ctx
+		onto: (dict at: #responseMetadata ifAbsent: [ nil ]).
+	^ self new
+		id: (dict at: #id ifAbsent: [ nil ]);
+		type: (dict at: #type ifAbsent: [ nil ]);
+		turn: (dict at: #turn ifAbsent: [ nil ]);
+		usage: (dict at: #usage ifAbsent: [ nil ]);
+		stopDetails: (dict at: #stopDetails ifAbsent: [ nil ]);
+		executionContainer: (dict at: #executionContainer ifAbsent: [ nil ]);
+		requestContext: ctx;
+		responseMetadata: restoredMeta;
+		yourself
+]
+
+{ #category : 'private' }
+ClaudeMessage class >> promoteMigratedRequestIdFrom: ctx onto: restoredMeta [
+	"Mission yvyt+pch2 migration: legacy snapshots stored requestId on the
+	 embedded request context; new shape stores it on responseMetadata.
+	 If the context carries a migratedRequestId rescued by
+	 ClaudeRequestContext>>fromSton:, copy it onto restoredMeta (creating
+	 a fresh metadata if absent) so the surface API still answers requestId
+	 on restore. Clear the transient slot so it cannot leak into a later
+	 re-serialization. Returns the (possibly newly created) restoredMeta."
+	| meta |
+	(ctx isNil or: [ ctx migratedRequestId isNil ]) ifTrue: [ ^ restoredMeta ].
+	meta := restoredMeta ifNil: [ ClaudeResponseMetadata new ].
+	meta requestId ifNil: [ meta requestId: ctx migratedRequestId ].
+	ctx migratedRequestId: nil.
+	^ meta
 ]
 
 { #category : 'instance creation' }

@@ -56,6 +56,28 @@ ClaudeDocumentBlockTest >> testCitationsEnabledAllPaths [
 ]
 
 { #category : 'tests' }
+ClaudeDocumentBlockTest >> testCitationsEnabledBooleanCoercion [
+	"Regression for the PR #24 Bugbot LOW finding. The raw citations: setter
+	is an escape hatch — STON/JSON restore can land non-Boolean values at
+	the #enabled key (e.g. the String 'true' before normalization). The
+	predicate must answer false for every non-identical-to-true value, not
+	leak the raw value out. Identity (==) keeps the contract while letting
+	Renraku's 'Unnecessary = true' rule stay quiet."
+	| doc |
+	doc := ClaudeDocumentBlock fromText: 'hello'.
+	doc citations: (Dictionary newFromPairs: { #enabled. 'true' }).
+	self deny: doc citationsEnabled.
+	doc citations: (Dictionary newFromPairs: { #enabled. 1 }).
+	self deny: doc citationsEnabled.
+	doc citations: (Dictionary newFromPairs: { #enabled. 'yes' }).
+	self deny: doc citationsEnabled.
+	doc citations: (Dictionary newFromPairs: { #enabled. nil }).
+	self deny: doc citationsEnabled.
+	doc citations: (Dictionary newFromPairs: { #enabled. true }).
+	self assert: doc citationsEnabled
+]
+
+{ #category : 'tests' }
 ClaudeDocumentBlockTest >> testCitationsEnabledNonDictionarySlot [
 	"The citations: setter allows non-Dictionary values through as an escape hatch
 	(e.g. nil clears the slot). STON/JSON restore could also land a non-Dictionary

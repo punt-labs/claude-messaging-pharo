@@ -441,13 +441,23 @@ ClaudeClient >> appendQueryParams: aDictionary toUrl: aUrl [
 	 page tokens containing reserved characters survive transport. Returns the
 	 new URL string; empty/nil dictionary returns aUrl unchanged. Three-strikes
 	 extraction from listFiles:, listSkills:, and listVersionsFor:params:."
-	| parts separator |
+	| query separator |
 	(aDictionary isNil or: [ aDictionary isEmpty ]) ifTrue: [ ^ aUrl ].
-	parts := OrderedCollection new.
-	aDictionary keys asSortedCollection do: [ :k |
-		parts add: k, '=', (aDictionary at: k) urlEncoded ].
+	query := String streamContents: [ :s |
+		| first |
+		first := true.
+		aDictionary keys asSortedCollection do: [ :k |
+			first
+				ifTrue: [ first := false ]
+				ifFalse: [ s nextPutAll: '&' ].
+			s nextPutAll: k.
+			s nextPutAll: '='.
+			s nextPutAll: (aDictionary at: k) urlEncoded ] ].
 	separator := (aUrl indexOf: $?) > 0 ifTrue: [ '&' ] ifFalse: [ '?' ].
-	^ aUrl, separator, (parts joinUsing: '&')
+	^ String streamContents: [ :s |
+		s nextPutAll: aUrl.
+		s nextPutAll: separator.
+		s nextPutAll: query ]
 ]
 
 { #category : 'private' }
@@ -1078,6 +1088,27 @@ ClaudeClient >> openTLSStreamingSocket: aClaudeMessageRequest [
 ]
 
 { #category : 'private' }
+ClaudeClient >> parseFrontmatterNameValue: aLine [
+	"Parse the value side of a `name: <value>` frontmatter line.
+	 Strips matched single- or double-quote pairs around the value;
+	 lone or mismatched quotes are left in place so the caller sees
+	 the raw oddity rather than a silently truncated name. Returns nil
+	 if the line is too short, the value is empty, or the value is
+	 still empty after quote stripping and trimming."
+	| value |
+	aLine size < 6 ifTrue: [ ^ nil ].
+	value := (aLine copyFrom: 6 to: aLine size) trimBoth.
+	value isEmpty ifTrue: [ ^ nil ].
+	(value size >= 2 and: [ value first = $" and: [ value last = $" ] ])
+		ifTrue: [ value := value copyFrom: 2 to: value size - 1 ].
+	(value size >= 2 and: [ value first = $' and: [ value last = $' ] ])
+		ifTrue: [ value := value copyFrom: 2 to: value size - 1 ].
+	value := value trimBoth.
+	value isEmpty ifTrue: [ ^ nil ].
+	^ value
+]
+
+{ #category : 'private' }
 ClaudeClient >> parseModelListResponse: jsonData [
 	"Private. Parse model list API response into structured dictionary."
 	^ Dictionary new
@@ -1164,9 +1195,8 @@ ClaudeClient >> skillNameFromFrontmatterAt: aSkillMdReference [
 	 frontmatter exists, no name: line is found, or the name value is
 	 empty. Does NOT require a full YAML parser -- we only need the
 	 leading `---` ... `---` block, and within it a simple
-	 `/^name:\s*(.+)$/` line. Matched single- or double-quote pairs are
-	 stripped. Lone or mismatched quotes are left in place so the caller
-	 sees the raw oddity rather than a silently truncated name."
+	 `/^name:\s*(.+)$/` line. See #parseFrontmatterNameValue: for the
+	 quote-stripping rules applied to the value side."
 	| lines |
 	aSkillMdReference exists ifFalse: [ ^ nil ].
 	lines := aSkillMdReference contents lines.
@@ -1176,18 +1206,8 @@ ClaudeClient >> skillNameFromFrontmatterAt: aSkillMdReference [
 		| line |
 		line := lines at: i.
 		line trimBoth = '---' ifTrue: [ ^ nil ].
-		(line beginsWith: 'name:') ifTrue: [
-			| value |
-			line size < 6 ifTrue: [ ^ nil ].
-			value := (line copyFrom: 6 to: line size) trimBoth.
-			value isEmpty ifTrue: [ ^ nil ].
-			(value size >= 2 and: [ value first = $" and: [ value last = $" ] ])
-				ifTrue: [ value := value copyFrom: 2 to: value size - 1 ].
-			(value size >= 2 and: [ value first = $' and: [ value last = $' ] ])
-				ifTrue: [ value := value copyFrom: 2 to: value size - 1 ].
-			value := value trimBoth.
-			value isEmpty ifTrue: [ ^ nil ].
-			^ value ] ].
+		(line beginsWith: 'name:')
+			ifTrue: [ ^ self parseFrontmatterNameValue: line ] ].
 	^ nil
 ]
 
@@ -1215,7 +1235,7 @@ ClaudeClient >> streamMessage: aClaudeMessageRequest do: aBlock [
 		on: NetworkError
 		do: [ :e | self signalNetworkErrorClosing: sock message: e class name , ': ' , e messageText ]
 	] ensure: [ sock close ].
-	(sock isKindOf: ClaudeStreamingSocket)
+	sock isClaudeStreamingSocket
 		ifTrue: [ message requestId: sock requestId ].
 	message outputFormat: aClaudeMessageRequest outputFormat.
 	^ message
@@ -1359,28 +1379,31 @@ ClaudeClient >> uploadVersionFor: aSkillId fromDirectory: aDirectoryReference [
 
 { #category : 'private' }
 ClaudeClient >> validateSkillUploadSize: aCollectionOfFiles [
-    "Reject skill uploads that exceed the per-file limit (25 MB) or the
-    total upload limit (100 MB summed across all files). Both limits are
-    enforced client-side so callers see a clear error before bytes are
-    read from disk and before the network round-trip. Uploads stream from
-    disk via ClaudeStreamingMultiPartEntity — the limits are defense in
-    depth against server-side rejection (413 Payload Too Large) and not
-    a client-side memory ceiling.
-    
-    Raises Error with the offending file basename (per-file case) or the
-    actual total size in MB (total case). The total is formatted as a
-    float with 2 decimal places so non-aligned totals report as
-    '107.50MB' rather than the Smalltalk Fraction printString
-    '(112721920/1048576)MB'."
-    | perFileLimit totalLimit totalBytes |
-    perFileLimit := self class maxSkillFileBytes.
-    totalLimit := self class maxSkillUploadBytes.
-    aCollectionOfFiles do: [ :file |
-        file size > perFileLimit ifTrue: [
-            Error signal: 'Skill file exceeds 25MB limit: ', file basename ] ].
-    totalBytes := aCollectionOfFiles inject: 0 into: [ :sum :f | sum + f size ].
-    totalBytes > totalLimit ifTrue: [
-        Error signal: 'Skill upload exceeds 100MB total limit (got ',
-            ((totalBytes / (1024 * 1024)) asFloat printShowingDecimalPlaces: 2),
-            'MB)' ]
+	"Reject skill uploads that exceed the per-file limit (25 MB) or the
+	total upload limit (100 MB summed across all files). Both limits are
+	enforced client-side so callers see a clear error before bytes are
+	read from disk and before the network round-trip. Uploads stream from
+	disk via ClaudeStreamingMultiPartEntity — the limits are defense in
+	depth against server-side rejection (413 Payload Too Large) and not
+	a client-side memory ceiling.
+
+	Raises Error with the offending file basename (per-file case) or the
+	actual total size in MB (total case). The total is formatted as a
+	float with 2 decimal places so non-aligned totals report as
+	'107.50MB' rather than the Smalltalk Fraction printString
+	'(112721920/1048576)MB'."
+	| perFileLimit totalLimit totalBytes |
+	perFileLimit := self class maxSkillFileBytes.
+	totalLimit := self class maxSkillUploadBytes.
+	aCollectionOfFiles do: [ :file |
+		file size > perFileLimit ifTrue: [
+			Error signal: (String streamContents: [ :s |
+				s nextPutAll: 'Skill file exceeds 25MB limit: '.
+				s nextPutAll: file basename ]) ] ].
+	totalBytes := aCollectionOfFiles inject: 0 into: [ :sum :f | sum + f size ].
+	totalBytes > totalLimit ifTrue: [
+		Error signal: (String streamContents: [ :s |
+			s nextPutAll: 'Skill upload exceeds 100MB total limit (got '.
+			s nextPutAll: ((totalBytes / (1024 * 1024)) asFloat printShowingDecimalPlaces: 2).
+			s nextPutAll: 'MB)' ]) ]
 ]

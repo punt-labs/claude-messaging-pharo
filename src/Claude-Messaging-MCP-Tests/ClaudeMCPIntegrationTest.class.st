@@ -60,7 +60,7 @@ Class {
 	#package : 'Claude-Messaging-MCP-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeMCPIntegrationTest >> defaultTimeLimit [
 	"MCP connector round-trip issues a message request whose generation
 	 itself depends on an outbound call from Anthropic to an external MCP
@@ -79,7 +79,7 @@ ClaudeMCPIntegrationTest >> testMCPConnectorRoundTripsAgainstAnthropic [
 	 creates no server-side resources on our side."
 
 	| client response mcpToolUseBlocks mcpToolResultBlocks resultBlock resultContent |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingMCPExample runOn: client.
 
@@ -102,7 +102,7 @@ ClaudeMCPIntegrationTest >> testMCPConnectorRoundTripsAgainstAnthropic [
 	 green while the external MCP server actually reported failure."
 	resultBlock := mcpToolResultBlocks first.
 	self
-		assert: resultBlock isError = false
+		deny: resultBlock isError
 		description: 'server returned a non-error result from the external MCP server'.
 
 	"content is polymorphic: a String (plain text) or an OrderedCollection of
@@ -136,7 +136,7 @@ ClaudeMCPIntegrationTest >> testMCPToolResultBlockContentUnionAgainstAnthropic [
 	 slip through because the first element happened to be text."
 
 	| client response resultBlocks content |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingMCPExample runOn: client.
 	resultBlocks := response content select: [ :b | b isMCPToolResultBlock ].

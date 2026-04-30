@@ -130,7 +130,7 @@ ClaudeServerToolIntegrationTest >> assertWebSearchWorksOn: aModel [
   self assert: response textContent isNotEmpty
 ]
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeServerToolIntegrationTest >> defaultTimeLimit [
   "Integration tests make real API calls. Allow 2 minutes per test."
   ^ 2 minutes

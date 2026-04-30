@@ -25,7 +25,7 @@ ClaudeMCPServerDefinitionTest >> testAsJsonRequiresNameAndUrl [
 	def name: 'ex'.
 	self should: [ def asJson ] raise: Error.
 	def url: 'https://x.com'.
-	self shouldnt: [ def asJson ] raise: Error
+	def asJson "must not raise once both required fields are populated"
 ]
 
 { #category : 'tests' }

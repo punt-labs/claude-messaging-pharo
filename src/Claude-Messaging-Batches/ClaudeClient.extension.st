@@ -121,13 +121,13 @@ ClaudeClient >> streamBatchResults: aBatchId do: aBlock [
 	 ClaudeBatchResult to aBlock. Returns an OrderedCollection of every result.
 
 	 Buffered (not incremental) for v0.6: reads the full JSONL response into
-	 memory, parses every non-empty line into a local collection, then does a
-	 single pass at the end yielding each entry to aBlock and accumulating the
-	 returned OrderedCollection. The Anthropic results endpoint sends one
-	 complete JSON object per line over a non-chunked HTTP response, so
-	 ZnClient buffers it correctly without needing the SSE-style streaming
-	 socket. ADR-43 documents the rationale; an incremental variant can be
-	 added later if callers report memory pressure on very large batches.
+	 memory, parses every non-empty line into an OrderedCollection FIRST,
+	 then does a single pass at the end yielding each entry to aBlock. The
+	 Anthropic results endpoint sends one complete JSON object per line over
+	 a non-chunked HTTP response, so ZnClient buffers it correctly without
+	 needing the SSE-style streaming socket. ADR-43 documents the rationale;
+	 an incremental variant can be added later if callers report memory
+	 pressure on very large batches.
 
 	 Both side effects -- aBlock invocation and results accumulation -- happen
 	 exactly once per entry, after the response is fully and successfully
@@ -151,9 +151,7 @@ ClaudeClient >> streamBatchResults: aBatchId do: aBlock [
 		body := (resp contents ifNil: [ '' ]) asString.
 		parsed := (body lines reject: [ :line | line trimBoth isEmpty ])
 			collect: [ :line | ClaudeBatchResult fromJson: (STONJSON fromString: line) ].
-		results := OrderedCollection new.
-		parsed do: [ :entry |
-			results add: entry.
-			aBlock value: entry ].
+		results := OrderedCollection withAll: parsed.
+		results do: [ :entry | aBlock value: entry ].
 		results ]
 ]

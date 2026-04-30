@@ -133,21 +133,20 @@ ClaudeMessageRequest >> cacheControl: aDictionary [
 	requestOptions cacheControl: aDictionary
 ]
 
-{ #category : 'json - private' }
+{ #category : 'accessing' }
 ClaudeMessageRequest >> composedSystem [
-  "Return the system prompt with any output format suffix appended.
-   Used by asJson instead of accessing system directly."
-  | suffix |
-  suffix := (outputConfig format notNil
-    and: [ outputConfig format respondsTo: #systemPromptSuffix ])
-      ifTrue: [ outputConfig format systemPromptSuffix ]
-      ifFalse: [ nil ].
-  (suffix isNil or: [ suffix isEmpty ]) ifTrue: [ ^ system ].
-  system ifNil: [ ^ suffix ].
-  system isString
-    ifTrue: [ ^ system, String cr, String cr, suffix ].
-  "Array of content blocks - append a ClaudeTextBlock"
-  ^ system copyWith: (ClaudeTextBlock text: suffix)
+	"Return the system prompt with any output format suffix appended.
+	 Used by asJson instead of accessing system directly. The output
+	 format polymorphically answers nil from #systemPromptSuffix unless
+	 it has one to inject."
+	| suffix |
+	suffix := outputConfig format ifNotNil: [ outputConfig format systemPromptSuffix ].
+	(suffix isNil or: [ suffix isEmpty ]) ifTrue: [ ^ system ].
+	system ifNil: [ ^ suffix ].
+	system isString
+		ifTrue: [ ^ system , String cr , String cr , suffix ].
+	"Array of content blocks - append a ClaudeTextBlock"
+	^ system copyWith: (ClaudeTextBlock text: suffix)
 ]
 
 { #category : 'accessing' }

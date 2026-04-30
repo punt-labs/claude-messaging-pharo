@@ -71,15 +71,15 @@ ClaudeBatchRequest class >> jsonKeyMap [
 ClaudeBatchRequest >> asJson [
 	"Wire shape: { 'custom_id': ..., 'params': { <ClaudeMessageRequest wire shape> } }.
 	 params can be either a ClaudeMessageRequest (the production path — caller built it
-	 in Smalltalk) or a raw Dictionary (the from-JSON round-trip path); send asJson when
-	 it responds, otherwise pass through."
+	 in Smalltalk) or a raw Dictionary (the from-JSON round-trip path). The Dictionary
+	 case skips asJson because it's already wire-shaped; otherwise we send asJson."
 	| dict paramsJson |
 	dict := OrderedDictionary new.
 	dict at: 'custom_id' put: customId.
 	params ifNotNil: [
-		paramsJson := (params respondsTo: #asJson)
-			ifTrue: [ params asJson ]
-			ifFalse: [ params ].
+		paramsJson := params isDictionary
+			ifTrue: [ params ]
+			ifFalse: [ params asJson ].
 		dict at: 'params' put: paramsJson ].
 	^ dict
 ]

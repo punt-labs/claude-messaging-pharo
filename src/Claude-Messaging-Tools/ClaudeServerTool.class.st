@@ -51,12 +51,12 @@ ClaudeServerTool class >> defaultType [
 	^ ''
 ]
 
-{ #category : 'json' }
+{ #category : 'instance creation' }
 ClaudeServerTool class >> fromJson: aDictionary [
 	"Reconstruct a server tool from a JSON dictionary. Dispatches on the name field (stable across versions), not the type field (version-specific). Returns nil for unknown names."
-	| name cls |
-	name := aDictionary at: 'name' ifAbsent: [ ^ nil ].
-	cls := self typeRegistry at: name ifAbsent: [ ^ nil ].
+	| toolName cls |
+	toolName := aDictionary at: 'name' ifAbsent: [ ^ nil ].
+	cls := self typeRegistry at: toolName ifAbsent: [ ^ nil ].
 	^ cls new populateFromJson: aDictionary; yourself
 ]
 
@@ -214,21 +214,39 @@ ClaudeServerTool >> maxUses: anInteger [
   maxUses := anInteger
 ]
 
+{ #category : 'private' }
+ClaudeServerTool >> populateDomainAndCitationsFrom: aDictionary [
+	"Allow/block domains and citations."
+	allowedDomains := aDictionary at: 'allowed_domains' ifAbsent: [ nil ].
+	blockedDomains := aDictionary at: 'blocked_domains' ifAbsent: [ nil ].
+	citations := aDictionary at: 'citations' ifAbsent: [ nil ]
+]
+
+{ #category : 'private' }
+ClaudeServerTool >> populateFlagsFrom: aDictionary [
+	"Boolean / list flags — defer_loading, strict, allowed_callers, input_examples, max_uses."
+	deferLoading := aDictionary at: 'defer_loading' ifAbsent: [ nil ].
+	strict := aDictionary at: 'strict' ifAbsent: [ nil ].
+	allowedCallers := aDictionary at: 'allowed_callers' ifAbsent: [ nil ].
+	inputExamples := aDictionary at: 'input_examples' ifAbsent: [ nil ].
+	maxUses := aDictionary at: 'max_uses' ifAbsent: [ nil ]
+]
+
 { #category : 'json' }
 ClaudeServerTool >> populateFromJson: aDictionary [
-  "Restore state from a JSON dictionary."
-  toolType := aDictionary at: 'type' ifAbsent: [ toolType ].
-  toolName := aDictionary at: 'name' ifAbsent: [ toolName ].
-  deferLoading := aDictionary at: 'defer_loading' ifAbsent: [ nil ].
-  strict := aDictionary at: 'strict' ifAbsent: [ nil ].
-  allowedCallers := aDictionary at: 'allowed_callers' ifAbsent: [ nil ].
-  inputExamples := aDictionary at: 'input_examples' ifAbsent: [ nil ].
-  (aDictionary at: 'cache_control' ifAbsent: [ nil ])
-    ifNotNil: [ :cc | cacheControl := ClaudeCacheControl fromJson: cc ].
-  maxUses := aDictionary at: 'max_uses' ifAbsent: [ nil ].
-  allowedDomains := aDictionary at: 'allowed_domains' ifAbsent: [ nil ].
-  blockedDomains := aDictionary at: 'blocked_domains' ifAbsent: [ nil ].
-  citations := aDictionary at: 'citations' ifAbsent: [ nil ]
+	"Restore state from a JSON dictionary."
+	self populateIdentityFrom: aDictionary.
+	self populateFlagsFrom: aDictionary.
+	(aDictionary at: 'cache_control' ifAbsent: [ nil ])
+		ifNotNil: [ :cc | cacheControl := ClaudeCacheControl fromJson: cc ].
+	self populateDomainAndCitationsFrom: aDictionary
+]
+
+{ #category : 'private' }
+ClaudeServerTool >> populateIdentityFrom: aDictionary [
+	"Identity slots — type and name."
+	toolType := aDictionary at: 'type' ifAbsent: [ toolType ].
+	toolName := aDictionary at: 'name' ifAbsent: [ toolName ]
 ]
 
 { #category : 'printing' }

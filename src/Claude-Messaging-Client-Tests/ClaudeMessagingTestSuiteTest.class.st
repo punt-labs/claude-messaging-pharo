@@ -14,12 +14,11 @@ Class {
 
 { #category : 'tests' }
 ClaudeMessagingTestSuiteTest >> testBuildFastSuiteExcludesSlow [
-	| suite excluded |
+	| suite excluded slowProtocols |
+	slowProtocols := #('tests-slow' 'tests-integration').
 	suite := ClaudeMessagingTestSuite fastSuite.
 	excluded := suite tests select: [ :t |
-		| proto |
-		proto := t class protocolNameOfSelector: t selector.
-		proto = 'tests-slow' or: [ proto = 'tests-integration' ] ].
+		slowProtocols includes: (t class protocolNameOfSelector: t selector) ].
 	self assert: excluded isEmpty
 ]
 
@@ -80,7 +79,11 @@ ClaudeMessagingTestSuiteTest >> testIncludesAllPackages [
 	| representedPackages |
 	representedPackages := (ClaudeMessagingTestSuite testClasses collect: [ :c | c package name ]) asSet.
 	ClaudeMessagingTestSuite packageNames do: [ :pn |
-		self assert: (representedPackages includes: pn) description: 'Missing package: ', pn ]
+		self
+			assert: (representedPackages includes: pn)
+			description: (String streamContents: [ :s |
+				s nextPutAll: 'Missing package: '.
+				s nextPutAll: pn ]) ]
 ]
 
 { #category : 'tests' }
@@ -93,6 +96,14 @@ ClaudeMessagingTestSuiteTest >> testIsNotTestCase [
 ClaudeMessagingTestSuiteTest >> testNoAgentPackagesListed [
 	"ClaudeMessagingTestSuite must not aggregate any Agent-layer test package."
 	ClaudeMessagingTestSuite packageNames do: [ :pn |
-		self deny: (pn beginsWith: 'Claude-Agent-') description: 'Agent package leaked into Messaging suite: ', pn.
-		self deny: (pn beginsWith: 'Claude-Workbench') description: 'Workbench package leaked into Messaging suite: ', pn ]
+		self
+			deny: (pn beginsWith: 'Claude-Agent-')
+			description: (String streamContents: [ :s |
+				s nextPutAll: 'Agent package leaked into Messaging suite: '.
+				s nextPutAll: pn ]).
+		self
+			deny: (pn beginsWith: 'Claude-Workbench')
+			description: (String streamContents: [ :s |
+				s nextPutAll: 'Workbench package leaked into Messaging suite: '.
+				s nextPutAll: pn ]) ]
 ]

@@ -55,7 +55,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeCitationsIntegrationTest >> defaultTimeLimit [
 	"Citation extraction drives an additional pass over the input
 	 document during generation. The default 10 s test timeout fires
@@ -78,7 +78,7 @@ ClaudeCitationsIntegrationTest >> testCitationsReturnedAgainstAnthropic [
 	 are stateless on our side."
 
 	| client response textBlocksWithCitations firstCitation |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingCitationsExample runOn: client.
 	textBlocksWithCitations := response content select: [ :b |

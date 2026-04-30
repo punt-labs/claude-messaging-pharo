@@ -43,6 +43,15 @@ ClaudeOutputFormat >> printOn: aStream [
 ]
 
 { #category : 'accessing' }
+ClaudeOutputFormat >> systemPromptSuffix [
+	"Polymorphic default: most output formats don't append a system-prompt
+	 suffix. ClaudeTextOutputFormat overrides this when configured to inject
+	 schema/style guidance. Returning nil here lets ClaudeMessageRequest>>
+	 composedSystem dispatch without a respondsTo: guard."
+	^ nil
+]
+
+{ #category : 'accessing' }
 ClaudeOutputFormat >> type [
   ^ type
 ]

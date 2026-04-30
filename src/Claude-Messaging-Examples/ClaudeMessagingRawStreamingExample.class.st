@@ -54,19 +54,20 @@ ClaudeMessagingRawStreamingExample class >> run [
 	^ self runOn: self resolveClient
 ]
 
-{ #category : 'examples' }
+{ #category : 'running' }
 ClaudeMessagingRawStreamingExample class >> runOn: aClient [
 	"Raw TLS-socket streaming end-to-end. Opens a streaming socket
 	 via the client (which applies the configured timeout and
 	 headers), wraps the socket with ClaudeSSEDecoder, drains the
 	 SSE events and accumulates them into a single ClaudeMessage.
 	 Copies the socket's requestId onto the final message (guarded
-	 by isKindOf: so buffered non-streaming sockets used in tests
-	 are a no-op) — mirrors ClaudeClient>>streamMessage:do:, so
-	 callers get the same Anthropic support correlation key whether
-	 they use the high-level or raw API. Returns that final
-	 message. See also ClaudeIntegrationTest>>testRealStreamingEvents
-	 for the live end-to-end contract."
+	 by isClaudeStreamingSocket polymorphic predicate so buffered
+	 non-streaming sockets used in tests are a no-op) — mirrors
+	 ClaudeClient>>streamMessage:do:, so callers get the same
+	 Anthropic support correlation key whether they use the
+	 high-level or raw API. Returns that final message. See also
+	 ClaudeIntegrationTest>>testRealStreamingEvents for the live
+	 end-to-end contract."
 	| sock decoder message |
 	sock := aClient openStreamingSocket: self buildRequest.
 	message := ClaudeMessage new.
@@ -74,7 +75,7 @@ ClaudeMessagingRawStreamingExample class >> runOn: aClient [
 		decoder := ClaudeSSEDecoder onStream: sock.
 		[ decoder hasNext ] whileTrue: [ message accumulate: decoder nextEvent ] ]
 		ensure: [ sock close ].
-	(sock isKindOf: ClaudeStreamingSocket)
+	sock isClaudeStreamingSocket
 		ifTrue: [ message requestId: sock requestId ].
 	^ message
 ]

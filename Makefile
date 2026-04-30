@@ -187,24 +187,27 @@ lint:
 		classes do: [ :cls | \
 			| findings | \
 			findings := OrderedCollection new. \
-			[ (ReCriticEngine critiquesOf: cls) do: [ :c | \
-				| entity | \
-				entity := c sourceAnchor entity. \
-				(entity isKindOf: CompiledMethod) \
-					ifTrue: [ findings add: (entity methodClass instanceSide name, ' >> #', entity selector, ': ', c rule name) ] \
-					ifFalse: [ findings add: (cls name, ': ', c rule name) ] ] ] \
-				on: Error do: [ :e | findings add: (cls name, ': ERROR ', e messageText) ]. \
+			{ cls. cls class } do: [ :side | \
+				[ (ReCriticEngine critiquesOf: side) do: [ :c | \
+					findings add: (side name, ': ', c rule name) ]. \
+				  side methods do: [ :m | \
+					m critiques do: [ :c | \
+						findings add: (m methodClass name, ' >> #', m selector, ': ', c rule name) ] ] ] \
+					on: Error do: [ :e | findings add: (side name, ': ERROR ', e messageText) ] ]. \
 			findings ifEmpty: [ results add: cls name, ': clean' ] \
 				ifNotEmpty: [ results addAll: findings ] ]. \
 		results ifEmpty: [ 'No SDK classes found' ] \
-			ifNotEmpty: [ String cr join: results ]") \
-		&& LINT_OUTPUT="$${RESULT#\'}" \
-		&& LINT_OUTPUT="$$(echo "$$LINT_OUTPUT" | sed "s/'$$//")" \
-		&& echo "$$LINT_OUTPUT" \
-		&& DIRTY=$$(echo "$$LINT_OUTPUT" | grep -v ': clean$$' | grep -v '^$$') \
-		&& if [ -n "$$DIRTY" ]; then echo "  FAIL lint findings present (see above)"; exit 1; fi \
-		&& echo "  ok lint clean" \
-		|| echo "Error: is the server running? (make start)"
+			ifNotEmpty: [ String cr join: results ]"); \
+	if [ -z "$$RESULT" ]; then \
+		echo "Error: is the server running? (make start)"; \
+		exit 1; \
+	fi; \
+	LINT_OUTPUT="$${RESULT#\'}"; \
+	LINT_OUTPUT="$$(echo "$$LINT_OUTPUT" | sed "s/'$$//")"; \
+	echo "$$LINT_OUTPUT"; \
+	DIRTY=$$(echo "$$LINT_OUTPUT" | grep -v ': clean$$' | grep -v '^$$' || true); \
+	if [ -n "$$DIRTY" ]; then echo "  FAIL lint findings present (see above)"; exit 1; fi; \
+	echo "  ok lint clean"
 
 drift:
 	@echo ">> Checking image-vs-disk method drift..."

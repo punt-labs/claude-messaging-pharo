@@ -54,7 +54,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeThinkingIntegrationTest >> defaultTimeLimit [
 	"Extended thinking generation drives a larger maxTokens budget and
 	 the model spends additional compute producing chain-of-thought
@@ -78,7 +78,7 @@ ClaudeThinkingIntegrationTest >> testThinkingBlockReturnedAgainstAnthropic [
 	 polymorphic isThinkingBlock predicate rather than isKindOf:."
 
 	| client response thinkingBlocks first |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingThinkingExample runOn: client.
 	thinkingBlocks := response content select: [ :b | b isThinkingBlock ].

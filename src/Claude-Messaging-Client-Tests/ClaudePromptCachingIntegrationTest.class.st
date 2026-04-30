@@ -51,7 +51,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudePromptCachingIntegrationTest >> defaultTimeLimit [
 	"Two live round-trips to api.anthropic.com plus model generation time
 	 on each. The default 10 s test timeout fires before a healthy
@@ -81,7 +81,7 @@ ClaudePromptCachingIntegrationTest >> testPromptCachingCacheCreationAndReadCycle
 	 entries expire on their own and the client creates no named resources."
 
 	| client pair first second |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	pair := ClaudeMessagingPromptCachingExample runTwiceOn: client.
 	first := pair first.

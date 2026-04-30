@@ -22,7 +22,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeFileIntegrationTest >> defaultTimeLimit [
     "Raise the default 10s limit for integration tests — 10 MB upload can take up to a minute over the wire."
     ^ 5 minutes
@@ -137,7 +137,9 @@ ClaudeFileIntegrationTest >> testUploadStreamsLargeFileWithBoundedMemory [
       self assert: metadata id isNotNil
     ] ensure: [
         (metadata notNil and: [metadata id notNil]) ifTrue: [
-            [client deleteFile: metadata id] on: Error do: [:e | ]].
+            [ client deleteFile: metadata id ]
+				on: Error
+				do: [ :ignored | "best-effort cleanup; ignore deletion failures so the local temp file is still removed below" nil ]].
         tempFile exists ifTrue: [tempFile delete]]
 ]
 

@@ -38,65 +38,59 @@ Class {
 	#package : 'Claude-Messaging-Types'
 }
 
-{ #category : 'persistence' }
+{ #category : 'instance creation' }
 ClaudeResponseMetadata class >> fromSton: stonReader [
-  "Restore a ClaudeResponseMetadata from STON. Every slot is nil-tolerant."
-  | dict meta |
-  dict := Dictionary new.
-  stonReader parseMapDo: [ :key :value | dict at: key put: value ].
-  meta := self new.
-  meta requestId: (dict at: #requestId ifAbsent: [ nil ]).
-  meta rateLimitRequestsLimit: (dict at: #rateLimitRequestsLimit ifAbsent: [ nil ]).
-  meta rateLimitRequestsRemaining: (dict at: #rateLimitRequestsRemaining ifAbsent: [ nil ]).
-  meta rateLimitRequestsReset: (dict at: #rateLimitRequestsReset ifAbsent: [ nil ]).
-  meta rateLimitInputTokensLimit: (dict at: #rateLimitInputTokensLimit ifAbsent: [ nil ]).
-  meta rateLimitInputTokensRemaining: (dict at: #rateLimitInputTokensRemaining ifAbsent: [ nil ]).
-  meta rateLimitInputTokensReset: (dict at: #rateLimitInputTokensReset ifAbsent: [ nil ]).
-  meta rateLimitOutputTokensLimit: (dict at: #rateLimitOutputTokensLimit ifAbsent: [ nil ]).
-  meta rateLimitOutputTokensRemaining: (dict at: #rateLimitOutputTokensRemaining ifAbsent: [ nil ]).
-  meta rateLimitOutputTokensReset: (dict at: #rateLimitOutputTokensReset ifAbsent: [ nil ]).
-  meta retryAfter: (dict at: #retryAfter ifAbsent: [ nil ]).
-  ^ meta
+	"Restore a ClaudeResponseMetadata from STON. Every slot is nil-tolerant."
+	| dict meta |
+	dict := Dictionary new.
+	stonReader parseMapDo: [ :key :value | dict at: key put: value ].
+	meta := self new.
+	meta requestId: (dict at: #requestId ifAbsent: [ nil ]).
+	meta restoreRequestCountersFrom: dict.
+	meta restoreInputTokenCountersFrom: dict.
+	meta restoreOutputTokenCountersFrom: dict.
+	meta retryAfter: (dict at: #retryAfter ifAbsent: [ nil ]).
+	^ meta
 ]
 
 { #category : 'instance creation' }
 ClaudeResponseMetadata class >> fromZnHeaders: aZnHeaders [
-  "Parse a ZnHeaders (or any Dictionary-shaped header collection that
-   responds to at:ifAbsent:) into a ClaudeResponseMetadata. Every slot
-   is nil when the corresponding header is absent OR when its value is
-   non-numeric (the *-limit, *-remaining, and retry-after counters all
-   parse via integerFromHeaderValue: which catches parse errors and
-   returns nil). Reset timestamps stay as the raw String the server sent.
-   Retry-After parses to an Integer (seconds) per RFC 7231 §7.1.3.
+	"Parse a ZnHeaders (or any Dictionary-shaped header collection that
+	 responds to at:ifAbsent:) into a ClaudeResponseMetadata. Every slot
+	 is nil when the corresponding header is absent OR when its value is
+	 non-numeric (the *-limit, *-remaining, and retry-after counters all
+	 parse via integerFromHeaderValue: which catches parse errors and
+	 returns nil). Reset timestamps stay as the raw String the server sent.
+	 Retry-After parses to an Integer (seconds) per RFC 7231 §7.1.3.
 
-   Header lookups: the nine anthropic-ratelimit-* headers are documented
-   by Anthropic as lowercase wire names, and ZnHeaders does
-   case-insensitive lookup, so a single lowercase probe resolves them
-   regardless of how the server cased them. Retry-After is the only
-   header that gets a title-case fallback: RFC 7231 §7.1.3 canonicalizes
-   it as Title-Case while older code paths (and ClaudeStreamingSocket>>
-   readHeaders, which lowercases on insertion) may store either casing.
-   The dual probe keeps a plain Dictionary that was built mixed-case
-   from breaking the parser."
-  | meta integers |
-  meta := self new.
-  meta requestId: (aZnHeaders at: 'request-id' ifAbsent: [ nil ]).
-  integers := self integerRateLimitSlots.
-  self rateLimitHeaderNames do: [ :pair |
-    | slot wire raw value |
-    slot := pair first.
-    wire := pair second.
-    raw := aZnHeaders at: wire ifAbsent: [ nil ].
-    raw ifNotNil: [
-      value := (integers includes: slot)
-        ifTrue: [ self integerFromHeaderValue: raw ]
-        ifFalse: [ raw ].
-      meta perform: (slot, ':') asSymbol with: value ] ].
-  (aZnHeaders
-    at: 'retry-after'
-    ifAbsent: [ aZnHeaders at: 'Retry-After' ifAbsent: [ nil ] ])
-      ifNotNil: [ :raw | meta retryAfter: (self integerFromHeaderValue: raw) ].
-  ^ meta
+	 Header lookups: the nine anthropic-ratelimit-* headers are documented
+	 by Anthropic as lowercase wire names, and ZnHeaders does
+	 case-insensitive lookup, so a single lowercase probe resolves them
+	 regardless of how the server cased them. Retry-After is the only
+	 header that gets a title-case fallback: RFC 7231 §7.1.3 canonicalizes
+	 it as Title-Case while older code paths (and ClaudeStreamingSocket>>
+	 readHeaders, which lowercases on insertion) may store either casing.
+	 The dual probe keeps a plain Dictionary that was built mixed-case
+	 from breaking the parser."
+	| meta |
+	meta := self new.
+	meta requestId: (aZnHeaders at: 'request-id' ifAbsent: [ nil ]).
+	self rateLimitHeaderWriters do: [ :triple |
+		| writer wire isInteger raw value |
+		writer := triple first.
+		wire := triple second.
+		isInteger := triple third.
+		raw := aZnHeaders at: wire ifAbsent: [ nil ].
+		raw ifNotNil: [
+			value := isInteger
+				ifTrue: [ self integerFromHeaderValue: raw ]
+				ifFalse: [ raw ].
+			writer value: meta value: value ] ].
+	(aZnHeaders
+		at: 'retry-after'
+		ifAbsent: [ aZnHeaders at: 'Retry-After' ifAbsent: [ nil ] ])
+			ifNotNil: [ :raw | meta retryAfter: (self integerFromHeaderValue: raw) ].
+	^ meta
 ]
 
 { #category : 'wire headers' }
@@ -130,26 +124,47 @@ ClaudeResponseMetadata class >> integerRateLimitSlots [
     #rateLimitOutputTokensRemaining)
 ]
 
-{ #category : 'wire headers' }
+{ #category : 'private' }
 ClaudeResponseMetadata class >> rateLimitHeaderNames [
-  "Answer an Array of {slot. wireHeaderName} pairs for the nine
-   anthropic-ratelimit-* headers. The wire names match the Go SDK's
-   recorded cassettes (e.g. .tmp/anthropic-sdk-go/toolrunner/testdata/
-   cassettes/tool_runner_custom_handling.yaml). HTTP/1.1 header lookup
-   is case-insensitive (RFC 7230 §3.2) and ZnHeaders honors that, so
-   the lowercase form here resolves the cassette's mixed-case
-   spellings (Anthropic-Ratelimit-Requests-Limit, etc.) without
-   duplicating each name."
-  ^ #(
-    (#rateLimitRequestsLimit 'anthropic-ratelimit-requests-limit')
-    (#rateLimitRequestsRemaining 'anthropic-ratelimit-requests-remaining')
-    (#rateLimitRequestsReset 'anthropic-ratelimit-requests-reset')
-    (#rateLimitInputTokensLimit 'anthropic-ratelimit-input-tokens-limit')
-    (#rateLimitInputTokensRemaining 'anthropic-ratelimit-input-tokens-remaining')
-    (#rateLimitInputTokensReset 'anthropic-ratelimit-input-tokens-reset')
-    (#rateLimitOutputTokensLimit 'anthropic-ratelimit-output-tokens-limit')
-    (#rateLimitOutputTokensRemaining 'anthropic-ratelimit-output-tokens-remaining')
-    (#rateLimitOutputTokensReset 'anthropic-ratelimit-output-tokens-reset'))
+	"Answer an Array of {slotSelector. wireHeaderName} pairs for the
+	 nine anthropic-ratelimit-* headers. The slotSelector here is a
+	 Symbol naming the writer's instance variable; it is preserved
+	 for back-compat with the catalog-pinning test
+	 (testHeaderNameCatalogMatchesGoSDK). Production parsing now
+	 uses #rateLimitHeaderWriters which carries a writer block per
+	 entry — direct dispatch instead of perform:."
+	^ #(
+		(#rateLimitRequestsLimit 'anthropic-ratelimit-requests-limit')
+		(#rateLimitRequestsRemaining 'anthropic-ratelimit-requests-remaining')
+		(#rateLimitRequestsReset 'anthropic-ratelimit-requests-reset')
+		(#rateLimitInputTokensLimit 'anthropic-ratelimit-input-tokens-limit')
+		(#rateLimitInputTokensRemaining 'anthropic-ratelimit-input-tokens-remaining')
+		(#rateLimitInputTokensReset 'anthropic-ratelimit-input-tokens-reset')
+		(#rateLimitOutputTokensLimit 'anthropic-ratelimit-output-tokens-limit')
+		(#rateLimitOutputTokensRemaining 'anthropic-ratelimit-output-tokens-remaining')
+		(#rateLimitOutputTokensReset 'anthropic-ratelimit-output-tokens-reset'))
+]
+
+{ #category : 'private' }
+ClaudeResponseMetadata class >> rateLimitHeaderWriters [
+	"Answer an Array of { writerBlock. wireHeaderName } triples for the
+	 nine anthropic-ratelimit-* headers. Each writer takes a metadata
+	 instance and a parsed value; the third element is whether the slot
+	 is integer-valued (otherwise the wire string is stored as-is for
+	 reset timestamps).
+
+	 Replaces the prior {slot. wire} shape that needed perform: dispatch
+	 — direct block invocation is polymorphic and Renraku-clean."
+	^ {
+		{ [ :m :v | m rateLimitRequestsLimit: v ]. 'anthropic-ratelimit-requests-limit'. true }.
+		{ [ :m :v | m rateLimitRequestsRemaining: v ]. 'anthropic-ratelimit-requests-remaining'. true }.
+		{ [ :m :v | m rateLimitRequestsReset: v ]. 'anthropic-ratelimit-requests-reset'. false }.
+		{ [ :m :v | m rateLimitInputTokensLimit: v ]. 'anthropic-ratelimit-input-tokens-limit'. true }.
+		{ [ :m :v | m rateLimitInputTokensRemaining: v ]. 'anthropic-ratelimit-input-tokens-remaining'. true }.
+		{ [ :m :v | m rateLimitInputTokensReset: v ]. 'anthropic-ratelimit-input-tokens-reset'. false }.
+		{ [ :m :v | m rateLimitOutputTokensLimit: v ]. 'anthropic-ratelimit-output-tokens-limit'. true }.
+		{ [ :m :v | m rateLimitOutputTokensRemaining: v ]. 'anthropic-ratelimit-output-tokens-remaining'. true }.
+		{ [ :m :v | m rateLimitOutputTokensReset: v ]. 'anthropic-ratelimit-output-tokens-reset'. false } }
 ]
 
 { #category : 'testing' }
@@ -170,32 +185,32 @@ ClaudeResponseMetadata >> hasRateLimits [
 
 { #category : 'printing' }
 ClaudeResponseMetadata >> printOn: aStream [
-  "Compact one-line render summarising the metadata. Always names the
-   request-id (or ? when nil). Each rate-limit axis (req, input, output)
-   prints only when BOTH its Limit and Remaining slots are non-nil, so
-   a partially populated test fixture renders only the complete axes
-   instead of literal nil/nil fractions. Retry-after prints only when set."
-  aStream nextPutAll: 'ClaudeResponseMetadata(req-id='.
-  aStream nextPutAll: (requestId ifNil: [ '?' ]).
-  (rateLimitRequestsLimit notNil and: [ rateLimitRequestsRemaining notNil ]) ifTrue: [
-    aStream nextPutAll: ' req '.
-    aStream print: rateLimitRequestsRemaining.
-    aStream nextPut: $/.
-    aStream print: rateLimitRequestsLimit ].
-  (rateLimitInputTokensLimit notNil and: [ rateLimitInputTokensRemaining notNil ]) ifTrue: [
-    aStream nextPutAll: ' input '.
-    aStream print: rateLimitInputTokensRemaining.
-    aStream nextPut: $/.
-    aStream print: rateLimitInputTokensLimit ].
-  (rateLimitOutputTokensLimit notNil and: [ rateLimitOutputTokensRemaining notNil ]) ifTrue: [
-    aStream nextPutAll: ' output '.
-    aStream print: rateLimitOutputTokensRemaining.
-    aStream nextPut: $/.
-    aStream print: rateLimitOutputTokensLimit ].
-  retryAfter ifNotNil: [
-    aStream nextPutAll: ' retry-after='.
-    aStream print: retryAfter ].
-  aStream nextPut: $)
+	"Compact one-line render summarising the metadata. Always names the
+	 request-id (or ? when nil). Each rate-limit axis (req, input, output)
+	 prints only when BOTH its Limit and Remaining slots are non-nil, so
+	 a partially populated test fixture renders only the complete axes
+	 instead of literal nil/nil fractions. Retry-after prints only when set."
+	aStream nextPutAll: 'ClaudeResponseMetadata(req-id='.
+	aStream nextPutAll: (requestId ifNil: [ '?' ]).
+	self printRateLimitAxisOn: aStream label: ' req ' limit: rateLimitRequestsLimit remaining: rateLimitRequestsRemaining.
+	self printRateLimitAxisOn: aStream label: ' input ' limit: rateLimitInputTokensLimit remaining: rateLimitInputTokensRemaining.
+	self printRateLimitAxisOn: aStream label: ' output ' limit: rateLimitOutputTokensLimit remaining: rateLimitOutputTokensRemaining.
+	retryAfter ifNotNil: [
+		aStream nextPutAll: ' retry-after='.
+		aStream print: retryAfter ].
+	aStream nextPut: $)
+]
+
+{ #category : 'private' }
+ClaudeResponseMetadata >> printRateLimitAxisOn: aStream label: aLabel limit: limitValue remaining: remainingValue [
+	"Print one rate-limit axis (req / input / output) only when both
+	 limit and remaining are non-nil."
+	(limitValue notNil and: [ remainingValue notNil ]) ifFalse: [ ^ self ].
+	aStream
+		nextPutAll: aLabel;
+		print: remainingValue;
+		nextPut: $/;
+		print: limitValue
 ]
 
 { #category : 'accessing' }
@@ -298,6 +313,27 @@ ClaudeResponseMetadata >> requestId: aValue [
 	requestId := aValue
 ]
 
+{ #category : 'private' }
+ClaudeResponseMetadata >> restoreInputTokenCountersFrom: dict [
+	rateLimitInputTokensLimit := dict at: #rateLimitInputTokensLimit ifAbsent: [ nil ].
+	rateLimitInputTokensRemaining := dict at: #rateLimitInputTokensRemaining ifAbsent: [ nil ].
+	rateLimitInputTokensReset := dict at: #rateLimitInputTokensReset ifAbsent: [ nil ]
+]
+
+{ #category : 'private' }
+ClaudeResponseMetadata >> restoreOutputTokenCountersFrom: dict [
+	rateLimitOutputTokensLimit := dict at: #rateLimitOutputTokensLimit ifAbsent: [ nil ].
+	rateLimitOutputTokensRemaining := dict at: #rateLimitOutputTokensRemaining ifAbsent: [ nil ].
+	rateLimitOutputTokensReset := dict at: #rateLimitOutputTokensReset ifAbsent: [ nil ]
+]
+
+{ #category : 'private' }
+ClaudeResponseMetadata >> restoreRequestCountersFrom: dict [
+	rateLimitRequestsLimit := dict at: #rateLimitRequestsLimit ifAbsent: [ nil ].
+	rateLimitRequestsRemaining := dict at: #rateLimitRequestsRemaining ifAbsent: [ nil ].
+	rateLimitRequestsReset := dict at: #rateLimitRequestsReset ifAbsent: [ nil ]
+]
+
 { #category : 'accessing' }
 ClaudeResponseMetadata >> retryAfter [
 	^ retryAfter
@@ -308,19 +344,37 @@ ClaudeResponseMetadata >> retryAfter: aValue [
 	retryAfter := aValue
 ]
 
-{ #category : 'persistence' }
+{ #category : 'private' }
+ClaudeResponseMetadata >> stonInputTokenCountersOn: map [
+	"Persist the three input-token-counter slots when non-nil."
+	rateLimitInputTokensLimit ifNotNil: [ map at: #rateLimitInputTokensLimit put: rateLimitInputTokensLimit ].
+	rateLimitInputTokensRemaining ifNotNil: [ map at: #rateLimitInputTokensRemaining put: rateLimitInputTokensRemaining ].
+	rateLimitInputTokensReset ifNotNil: [ map at: #rateLimitInputTokensReset put: rateLimitInputTokensReset ]
+]
+
+{ #category : 'ston' }
 ClaudeResponseMetadata >> stonOn: aStonWriter [
-  "Persist non-nil slots so absent headers stay absent after round-trip."
-  aStonWriter writeObject: self streamMap: [ :map |
-    requestId ifNotNil: [ map at: #requestId put: requestId ].
-    rateLimitRequestsLimit ifNotNil: [ map at: #rateLimitRequestsLimit put: rateLimitRequestsLimit ].
-    rateLimitRequestsRemaining ifNotNil: [ map at: #rateLimitRequestsRemaining put: rateLimitRequestsRemaining ].
-    rateLimitRequestsReset ifNotNil: [ map at: #rateLimitRequestsReset put: rateLimitRequestsReset ].
-    rateLimitInputTokensLimit ifNotNil: [ map at: #rateLimitInputTokensLimit put: rateLimitInputTokensLimit ].
-    rateLimitInputTokensRemaining ifNotNil: [ map at: #rateLimitInputTokensRemaining put: rateLimitInputTokensRemaining ].
-    rateLimitInputTokensReset ifNotNil: [ map at: #rateLimitInputTokensReset put: rateLimitInputTokensReset ].
-    rateLimitOutputTokensLimit ifNotNil: [ map at: #rateLimitOutputTokensLimit put: rateLimitOutputTokensLimit ].
-    rateLimitOutputTokensRemaining ifNotNil: [ map at: #rateLimitOutputTokensRemaining put: rateLimitOutputTokensRemaining ].
-    rateLimitOutputTokensReset ifNotNil: [ map at: #rateLimitOutputTokensReset put: rateLimitOutputTokensReset ].
-    retryAfter ifNotNil: [ map at: #retryAfter put: retryAfter ] ]
+	"Persist non-nil slots so absent headers stay absent after round-trip."
+	aStonWriter writeObject: self streamMap: [ :map |
+		requestId ifNotNil: [ map at: #requestId put: requestId ].
+		self stonRequestCountersOn: map.
+		self stonInputTokenCountersOn: map.
+		self stonOutputTokenCountersOn: map.
+		retryAfter ifNotNil: [ map at: #retryAfter put: retryAfter ] ]
+]
+
+{ #category : 'private' }
+ClaudeResponseMetadata >> stonOutputTokenCountersOn: map [
+	"Persist the three output-token-counter slots when non-nil."
+	rateLimitOutputTokensLimit ifNotNil: [ map at: #rateLimitOutputTokensLimit put: rateLimitOutputTokensLimit ].
+	rateLimitOutputTokensRemaining ifNotNil: [ map at: #rateLimitOutputTokensRemaining put: rateLimitOutputTokensRemaining ].
+	rateLimitOutputTokensReset ifNotNil: [ map at: #rateLimitOutputTokensReset put: rateLimitOutputTokensReset ]
+]
+
+{ #category : 'private' }
+ClaudeResponseMetadata >> stonRequestCountersOn: map [
+	"Persist the three request-counter slots when non-nil."
+	rateLimitRequestsLimit ifNotNil: [ map at: #rateLimitRequestsLimit put: rateLimitRequestsLimit ].
+	rateLimitRequestsRemaining ifNotNil: [ map at: #rateLimitRequestsRemaining put: rateLimitRequestsRemaining ].
+	rateLimitRequestsReset ifNotNil: [ map at: #rateLimitRequestsReset put: rateLimitRequestsReset ]
 ]

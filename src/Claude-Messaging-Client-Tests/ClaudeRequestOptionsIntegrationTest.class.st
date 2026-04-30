@@ -26,7 +26,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeRequestOptionsIntegrationTest >> defaultTimeLimit [
 	"One live round-trip to api.anthropic.com plus generation time.
 	 2 minutes matches other integration tests in this package."
@@ -50,7 +50,7 @@ ClaudeRequestOptionsIntegrationTest >> testRequestOptionsFieldsClearServerValida
 	 response usage serviceTier = 'auto'.
 	 Skips cleanly when no API key is present."
 	| client response |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingRequestOptionsExample runOn: client.
 	self

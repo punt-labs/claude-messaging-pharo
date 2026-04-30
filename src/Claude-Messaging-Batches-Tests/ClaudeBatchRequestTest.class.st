@@ -52,7 +52,7 @@ ClaudeBatchRequestTest >> testCustomIdParams [
 		yourself.
 	req := ClaudeBatchRequest customId: 'req-1' params: msgReq.
 	self assert: req customId equals: 'req-1'.
-	self assert: req params == msgReq
+	self assert: req params identicalTo: msgReq
 ]
 
 { #category : 'tests' }

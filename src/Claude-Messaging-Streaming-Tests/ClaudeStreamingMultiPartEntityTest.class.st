@@ -101,9 +101,12 @@ ClaudeStreamingMultiPartEntityTest >> startSpy [
 
 { #category : 'running' }
 ClaudeStreamingMultiPartEntityTest >> tearDown [
-    tempFiles ifNotNil: [
-        tempFiles do: [:f | [f exists ifTrue: [f delete]] on: Error do: [:e | ]] ].
-    super tearDown
+	tempFiles ifNotNil: [
+		tempFiles do: [ :f |
+			[ f exists ifTrue: [ f delete ] ]
+				on: Error
+				do: [ :ignored | "best-effort cleanup; a delete failure on a temp file shouldn't fail the test" nil ] ] ].
+	super tearDown
 ]
 
 { #category : 'tests' }
@@ -247,28 +250,37 @@ ClaudeStreamingMultiPartEntityTest >> testEmptyEntityHasNoParts [
 
 { #category : 'tests' }
 ClaudeStreamingMultiPartEntityTest >> testGenerateBoundaryProducesExactly32HexChars [
-    "Regression guard for an off-by-one in generateBoundary. Before the fix,
-    bytes := (1 to: 16) collect: [:i | random nextInteger: 256] drew from
-    [1, 256]. When 256 appeared (~0.4% per byte, ~6% across 16 bytes), its
-    hex printString was '100' (3 chars) and padLeftTo: 2 does not truncate,
-    so the resulting boundary suffix was 33 chars instead of the documented
-    32. After the fix ((random nextInteger: 256) - 1), every byte lands in
-    [0, 255] so every hex pair is exactly 2 chars and every boundary is
-    exactly 21 prefix + 32 hex suffix = 53 chars.
+	"Regression guard for an off-by-one in generateBoundary. Before the fix,
+	bytes := (1 to: 16) collect: [:i | random nextInteger: 256] drew from
+	[1, 256]. When 256 appeared (~0.4% per byte, ~6% across 16 bytes), its
+	hex printString was '100' (3 chars) and padLeftTo: 2 does not truncate,
+	so the resulting boundary suffix was 33 chars instead of the documented
+	32. After the fix ((random nextInteger: 256) - 1), every byte lands in
+	[0, 255] so every hex pair is exactly 2 chars and every boundary is
+	exactly 21 prefix + 32 hex suffix = 53 chars.
 
-    200 draws is comfortably beyond the ~6% bad-rate so the test fails
-    deterministically against the pre-fix code within a handful of boundaries;
-    post-fix it passes 200/200."
-    | prefixSize suffixLength |
-    prefixSize := '--zn-claude-boundary-' size.
-    suffixLength := 32.
-    1 to: 200 do: [:i |
-        | entity actualSuffix |
-        entity := ClaudeStreamingMultiPartEntity new.
-        actualSuffix := entity boundary size - prefixSize.
-        self
-            assert: actualSuffix = suffixLength
-            description: 'boundary suffix size must be ' , suffixLength printString , ' hex chars but was ' , actualSuffix printString , ' on draw #' , i printString , ' (boundary = ' , entity boundary , ')' ]
+	200 draws is comfortably beyond the ~6% bad-rate so the test fails
+	deterministically against the pre-fix code within a handful of boundaries;
+	post-fix it passes 200/200."
+	| prefixSize suffixLength |
+	prefixSize := '--zn-claude-boundary-' size.
+	suffixLength := 32.
+	1 to: 200 do: [ :i |
+		| entity actualSuffix |
+		entity := ClaudeStreamingMultiPartEntity new.
+		actualSuffix := entity boundary size - prefixSize.
+		self
+			assert: actualSuffix = suffixLength
+			description: (String streamContents: [ :s |
+				s nextPutAll: 'boundary suffix size must be '.
+				s print: suffixLength.
+				s nextPutAll: ' hex chars but was '.
+				s print: actualSuffix.
+				s nextPutAll: ' on draw #'.
+				s print: i.
+				s nextPutAll: ' (boundary = '.
+				s nextPutAll: entity boundary.
+				s nextPutAll: ')' ]) ]
 ]
 
 { #category : 'tests' }

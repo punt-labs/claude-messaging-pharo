@@ -51,7 +51,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeImageIntegrationTest >> defaultTimeLimit [
 	"Image processing drives a URL fetch, image decode, and multimodal
 	 inference pass in addition to the normal text generation. The
@@ -77,7 +77,7 @@ ClaudeImageIntegrationTest >> testImageInputProcessedAgainstAnthropic [
 	 is stateless on our side."
 
 	| client response |
-	[ client := ClaudeSDKExampleSupport resolveClient ]
+	client := [ ClaudeSDKExampleSupport resolveClient ]
 		on: Error do: [ :e | ^ self skip ].
 	response := ClaudeMessagingImageExample runOn: client.
 	self

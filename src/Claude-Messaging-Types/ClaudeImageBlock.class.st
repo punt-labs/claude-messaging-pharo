@@ -38,7 +38,7 @@ ClaudeImageBlock class >> base64: encodedData mediaType: mimeType [
 	^ self newFromValidatedBase64: encodedData mediaType: mimeType
 ]
 
-{ #category : 'limits' }
+{ #category : 'private' }
 ClaudeImageBlock class >> estimatedRawByteSize: encodedData [
 	"Estimate the raw (decoded) byte count of a base64-encoded string without
 	performing the full decode. Base64 encodes every 3 raw bytes as 4 characters
@@ -51,7 +51,7 @@ ClaudeImageBlock class >> estimatedRawByteSize: encodedData [
 	| encoded padding trimmedLen |
 	encoded := encodedData.
 	padding := 0.
-	(encoded size >= 1 and: [ (encoded at: encoded size) = $= ]) ifTrue: [ padding := padding + 1 ].
+	(encoded isNotEmpty and: [ encoded last = $= ]) ifTrue: [ padding := padding + 1 ].
 	(encoded size >= 2 and: [ (encoded at: encoded size - 1) = $= ]) ifTrue: [ padding := padding + 1 ].
 	trimmedLen := (encoded size * 3) // 4.
 	^ (trimmedLen - padding) max: 0

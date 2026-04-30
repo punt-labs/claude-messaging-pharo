@@ -95,15 +95,10 @@ ClaudeAbstractTestSuite class >> suiteLabel [
 	^ 'Claude Tests'
 ]
 
-{ #category : 'accessing' }
+{ #category : 'building' }
 ClaudeAbstractTestSuite class >> testClasses [
 	"Answer all TestCase subclasses from this suite factory's packages."
-	| classes |
-	classes := OrderedCollection new.
-	self packageNames do: [ :pn |
-		(Smalltalk globals allClasses select: [ :c |
-			(c includesBehavior: TestCase) and: [
-				c package name = pn ] ])
-			do: [ :cls | classes add: cls ] ].
-	^ classes
+	^ self packageNames flatCollect: [ :pn |
+		Smalltalk globals allClasses select: [ :c |
+			(c includesBehavior: TestCase) and: [ c package name = pn ] ] ]
 ]
