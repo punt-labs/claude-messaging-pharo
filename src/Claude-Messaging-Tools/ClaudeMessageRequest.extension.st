@@ -21,12 +21,13 @@ ClaudeMessageRequest >> addMemory [
 { #category : '*Claude-Messaging-Tools' }
 ClaudeMessageRequest >> addServerTool: aClaudeServerTool [
 	"Add a server tool to the tools list, creating the list if needed.
-	 Converts Array to OrderedCollection since Arrays are fixed-size.
+	 Promotes a fixed-size Array (from JSON/STON restore) to a mutable
+	 OrderedCollection so #add: can succeed.
 	 Uses accessor (not direct ivar) since this is an extension method from Claude-Messaging-Tools."
 	| tools |
 	tools := self toolParams tools.
 	tools ifNil: [ tools := OrderedCollection new. self toolParams tools: tools ].
-	(tools isKindOf: OrderedCollection) ifFalse: [
+	tools isArray ifTrue: [
 		tools := OrderedCollection withAll: tools.
 		self toolParams tools: tools ].
 	tools add: aClaudeServerTool

@@ -87,6 +87,11 @@ ClaudeStreamingSocket >> initialize [
 ]
 
 { #category : 'testing' }
+ClaudeStreamingSocket >> isClaudeStreamingSocket [
+	^ true
+]
+
+{ #category : 'testing' }
 ClaudeStreamingSocket >> isConnected [
 	"True when the TLS stream is connected."
 	stream ifNil: [ ^ false ].

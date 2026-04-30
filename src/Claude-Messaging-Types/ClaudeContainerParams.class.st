@@ -112,6 +112,11 @@ ClaudeContainerParams >> initialize [
 	extraFields := Dictionary new
 ]
 
+{ #category : 'testing' }
+ClaudeContainerParams >> isClaudeContainerParams [
+	^ true
+]
+
 { #category : 'accessing' }
 ClaudeContainerParams >> skills [
 	^ skills

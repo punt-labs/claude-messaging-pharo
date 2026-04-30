@@ -130,7 +130,7 @@ ClaudeDocumentBlock >> citations: aDictionary [
 	keys) and hand-built blocks behave identically through citationsEnabled and
 	asJson. Non-Dictionary input passes through unchanged (e.g. nil clears the slot)."
 	| normalized |
-	(aDictionary isKindOf: Dictionary)
+	aDictionary isDictionary
 		ifFalse: [ citations := aDictionary ]
 		ifTrue: [
 			(aDictionary includesKey: 'enabled')
@@ -152,18 +152,21 @@ ClaudeDocumentBlock >> citationsEnabled [
 	arbitrary values through as an escape hatch, and STON/JSON restore can land
 	one here too), { #enabled -> false }, missing #enabled key, or raw Dictionary
 	with any other shape. Callers should prefer this predicate over poking at the
-	raw Dictionary."
+	raw Dictionary. The slot is set via #enableCitations / #disableCitations
+	which always write Boolean values; the raw #citations: setter is an escape
+	hatch where non-Boolean values would surface truthfully."
 	citations ifNil: [ ^ false ].
-	(citations isKindOf: Dictionary) ifFalse: [ ^ false ].
-	^ (citations at: #enabled ifAbsent: [ false ]) = true
+	citations isDictionary ifFalse: [ ^ false ].
+	^ citations at: #enabled ifAbsent: [ false ]
 ]
 
 { #category : 'accessing' }
 ClaudeDocumentBlock >> data [
-  "Backwards compatibility: delegate to source for base64/text sources."
-  ^ (source notNil and: [ source respondsTo: #data ])
-      ifTrue: [ source data ]
-      ifFalse: [ nil ]
+	"Backwards compatibility: delegate to source. ClaudeDocumentSource
+	 answers nil from #data unless a subclass carries inline data
+	 (Base64/Text), so the polymorphic call covers every shape without
+	 a respondsTo: guard."
+	^ source ifNotNil: [ source data ]
 ]
 
 { #category : 'accessing' }
@@ -173,7 +176,8 @@ ClaudeDocumentBlock >> disableCitations [
 	Anthropic's API recognizes { enabled: true } as the opt-in signal; the opt-out
 	is key omission, and emitting false is undefined behavior that must not be sent
 	on the wire."
-	citations := nil
+	citations := nil.
+	^ self
 ]
 
 { #category : 'accessing' }
@@ -184,7 +188,8 @@ ClaudeDocumentBlock >> enableCitations [
 	so an enabled block serializes its citations key and a disabled one omits it.
 	Preferred over the raw citations: setter for new code — self-documenting,
 	prevents accidental wire-shape drift."
-	citations := { #enabled -> true } asDictionary
+	citations := { #enabled -> true } asDictionary.
+	^ self
 ]
 
 { #category : 'initialization' }
@@ -200,10 +205,10 @@ ClaudeDocumentBlock >> isDocumentBlock [
 
 { #category : 'accessing' }
 ClaudeDocumentBlock >> mediaType [
-  "Backwards compatibility: delegate to source for base64/text sources."
-  ^ (source notNil and: [ source respondsTo: #mediaType ])
-      ifTrue: [ source mediaType ]
-      ifFalse: [ nil ]
+	"Backwards compatibility: delegate to source. ClaudeDocumentSource
+	 answers nil from #mediaType unless a subclass advertises one
+	 (Base64/Text)."
+	^ source ifNotNil: [ source mediaType ]
 ]
 
 { #category : 'accessing' }

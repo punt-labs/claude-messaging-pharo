@@ -61,42 +61,42 @@ ClaudeResponseMetadata class >> fromSton: stonReader [
 
 { #category : 'instance creation' }
 ClaudeResponseMetadata class >> fromZnHeaders: aZnHeaders [
-  "Parse a ZnHeaders (or any Dictionary-shaped header collection that
-   responds to at:ifAbsent:) into a ClaudeResponseMetadata. Every slot
-   is nil when the corresponding header is absent OR when its value is
-   non-numeric (the *-limit, *-remaining, and retry-after counters all
-   parse via integerFromHeaderValue: which catches parse errors and
-   returns nil). Reset timestamps stay as the raw String the server sent.
-   Retry-After parses to an Integer (seconds) per RFC 7231 §7.1.3.
+	"Parse a ZnHeaders (or any Dictionary-shaped header collection that
+	 responds to at:ifAbsent:) into a ClaudeResponseMetadata. Every slot
+	 is nil when the corresponding header is absent OR when its value is
+	 non-numeric (the *-limit, *-remaining, and retry-after counters all
+	 parse via integerFromHeaderValue: which catches parse errors and
+	 returns nil). Reset timestamps stay as the raw String the server sent.
+	 Retry-After parses to an Integer (seconds) per RFC 7231 §7.1.3.
 
-   Header lookups: the nine anthropic-ratelimit-* headers are documented
-   by Anthropic as lowercase wire names, and ZnHeaders does
-   case-insensitive lookup, so a single lowercase probe resolves them
-   regardless of how the server cased them. Retry-After is the only
-   header that gets a title-case fallback: RFC 7231 §7.1.3 canonicalizes
-   it as Title-Case while older code paths (and ClaudeStreamingSocket>>
-   readHeaders, which lowercases on insertion) may store either casing.
-   The dual probe keeps a plain Dictionary that was built mixed-case
-   from breaking the parser."
-  | meta integers |
-  meta := self new.
-  meta requestId: (aZnHeaders at: 'request-id' ifAbsent: [ nil ]).
-  integers := self integerRateLimitSlots.
-  self rateLimitHeaderNames do: [ :pair |
-    | slot wire raw value |
-    slot := pair first.
-    wire := pair second.
-    raw := aZnHeaders at: wire ifAbsent: [ nil ].
-    raw ifNotNil: [
-      value := (integers includes: slot)
-        ifTrue: [ self integerFromHeaderValue: raw ]
-        ifFalse: [ raw ].
-      meta perform: (slot, ':') asSymbol with: value ] ].
-  (aZnHeaders
-    at: 'retry-after'
-    ifAbsent: [ aZnHeaders at: 'Retry-After' ifAbsent: [ nil ] ])
-      ifNotNil: [ :raw | meta retryAfter: (self integerFromHeaderValue: raw) ].
-  ^ meta
+	 Header lookups: the nine anthropic-ratelimit-* headers are documented
+	 by Anthropic as lowercase wire names, and ZnHeaders does
+	 case-insensitive lookup, so a single lowercase probe resolves them
+	 regardless of how the server cased them. Retry-After is the only
+	 header that gets a title-case fallback: RFC 7231 §7.1.3 canonicalizes
+	 it as Title-Case while older code paths (and ClaudeStreamingSocket>>
+	 readHeaders, which lowercases on insertion) may store either casing.
+	 The dual probe keeps a plain Dictionary that was built mixed-case
+	 from breaking the parser."
+	| meta |
+	meta := self new.
+	meta requestId: (aZnHeaders at: 'request-id' ifAbsent: [ nil ]).
+	self rateLimitHeaderWriters do: [ :triple |
+		| writer wire isInteger raw value |
+		writer := triple first.
+		wire := triple second.
+		isInteger := triple third.
+		raw := aZnHeaders at: wire ifAbsent: [ nil ].
+		raw ifNotNil: [
+			value := isInteger
+				ifTrue: [ self integerFromHeaderValue: raw ]
+				ifFalse: [ raw ].
+			writer value: meta value: value ] ].
+	(aZnHeaders
+		at: 'retry-after'
+		ifAbsent: [ aZnHeaders at: 'Retry-After' ifAbsent: [ nil ] ])
+			ifNotNil: [ :raw | meta retryAfter: (self integerFromHeaderValue: raw) ].
+	^ meta
 ]
 
 { #category : 'wire headers' }
@@ -130,26 +130,47 @@ ClaudeResponseMetadata class >> integerRateLimitSlots [
     #rateLimitOutputTokensRemaining)
 ]
 
-{ #category : 'wire headers' }
+{ #category : 'private' }
 ClaudeResponseMetadata class >> rateLimitHeaderNames [
-  "Answer an Array of {slot. wireHeaderName} pairs for the nine
-   anthropic-ratelimit-* headers. The wire names match the Go SDK's
-   recorded cassettes (e.g. .tmp/anthropic-sdk-go/toolrunner/testdata/
-   cassettes/tool_runner_custom_handling.yaml). HTTP/1.1 header lookup
-   is case-insensitive (RFC 7230 §3.2) and ZnHeaders honors that, so
-   the lowercase form here resolves the cassette's mixed-case
-   spellings (Anthropic-Ratelimit-Requests-Limit, etc.) without
-   duplicating each name."
-  ^ #(
-    (#rateLimitRequestsLimit 'anthropic-ratelimit-requests-limit')
-    (#rateLimitRequestsRemaining 'anthropic-ratelimit-requests-remaining')
-    (#rateLimitRequestsReset 'anthropic-ratelimit-requests-reset')
-    (#rateLimitInputTokensLimit 'anthropic-ratelimit-input-tokens-limit')
-    (#rateLimitInputTokensRemaining 'anthropic-ratelimit-input-tokens-remaining')
-    (#rateLimitInputTokensReset 'anthropic-ratelimit-input-tokens-reset')
-    (#rateLimitOutputTokensLimit 'anthropic-ratelimit-output-tokens-limit')
-    (#rateLimitOutputTokensRemaining 'anthropic-ratelimit-output-tokens-remaining')
-    (#rateLimitOutputTokensReset 'anthropic-ratelimit-output-tokens-reset'))
+	"Answer an Array of {slotSelector. wireHeaderName} pairs for the
+	 nine anthropic-ratelimit-* headers. The slotSelector here is a
+	 Symbol naming the writer's instance variable; it is preserved
+	 for back-compat with the catalog-pinning test
+	 (testHeaderNameCatalogMatchesGoSDK). Production parsing now
+	 uses #rateLimitHeaderWriters which carries a writer block per
+	 entry — direct dispatch instead of perform:."
+	^ #(
+		(#rateLimitRequestsLimit 'anthropic-ratelimit-requests-limit')
+		(#rateLimitRequestsRemaining 'anthropic-ratelimit-requests-remaining')
+		(#rateLimitRequestsReset 'anthropic-ratelimit-requests-reset')
+		(#rateLimitInputTokensLimit 'anthropic-ratelimit-input-tokens-limit')
+		(#rateLimitInputTokensRemaining 'anthropic-ratelimit-input-tokens-remaining')
+		(#rateLimitInputTokensReset 'anthropic-ratelimit-input-tokens-reset')
+		(#rateLimitOutputTokensLimit 'anthropic-ratelimit-output-tokens-limit')
+		(#rateLimitOutputTokensRemaining 'anthropic-ratelimit-output-tokens-remaining')
+		(#rateLimitOutputTokensReset 'anthropic-ratelimit-output-tokens-reset'))
+]
+
+{ #category : 'private' }
+ClaudeResponseMetadata class >> rateLimitHeaderWriters [
+	"Answer an Array of { writerBlock. wireHeaderName } triples for the
+	 nine anthropic-ratelimit-* headers. Each writer takes a metadata
+	 instance and a parsed value; the third element is whether the slot
+	 is integer-valued (otherwise the wire string is stored as-is for
+	 reset timestamps).
+
+	 Replaces the prior {slot. wire} shape that needed perform: dispatch
+	 — direct block invocation is polymorphic and Renraku-clean."
+	^ {
+		{ [ :m :v | m rateLimitRequestsLimit: v ]. 'anthropic-ratelimit-requests-limit'. true }.
+		{ [ :m :v | m rateLimitRequestsRemaining: v ]. 'anthropic-ratelimit-requests-remaining'. true }.
+		{ [ :m :v | m rateLimitRequestsReset: v ]. 'anthropic-ratelimit-requests-reset'. false }.
+		{ [ :m :v | m rateLimitInputTokensLimit: v ]. 'anthropic-ratelimit-input-tokens-limit'. true }.
+		{ [ :m :v | m rateLimitInputTokensRemaining: v ]. 'anthropic-ratelimit-input-tokens-remaining'. true }.
+		{ [ :m :v | m rateLimitInputTokensReset: v ]. 'anthropic-ratelimit-input-tokens-reset'. false }.
+		{ [ :m :v | m rateLimitOutputTokensLimit: v ]. 'anthropic-ratelimit-output-tokens-limit'. true }.
+		{ [ :m :v | m rateLimitOutputTokensRemaining: v ]. 'anthropic-ratelimit-output-tokens-remaining'. true }.
+		{ [ :m :v | m rateLimitOutputTokensReset: v ]. 'anthropic-ratelimit-output-tokens-reset'. false } }
 ]
 
 { #category : 'testing' }

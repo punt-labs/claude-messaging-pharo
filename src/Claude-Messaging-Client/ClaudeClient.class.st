@@ -1215,7 +1215,7 @@ ClaudeClient >> streamMessage: aClaudeMessageRequest do: aBlock [
 		on: NetworkError
 		do: [ :e | self signalNetworkErrorClosing: sock message: e class name , ': ' , e messageText ]
 	] ensure: [ sock close ].
-	(sock isKindOf: ClaudeStreamingSocket)
+	sock isClaudeStreamingSocket
 		ifTrue: [ message requestId: sock requestId ].
 	message outputFormat: aClaudeMessageRequest outputFormat.
 	^ message

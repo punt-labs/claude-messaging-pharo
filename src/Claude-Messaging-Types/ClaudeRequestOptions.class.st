@@ -138,8 +138,8 @@ ClaudeRequestOptions >> container: aStringOrContainerParams [
 	 doesNotUnderstand: deep inside serialization."
 	(aStringOrContainerParams isNil
 		or: [ aStringOrContainerParams isString
-			or: [ aStringOrContainerParams isKindOf: ClaudeContainerParams ] ])
-		ifFalse: [ self error: 'container: requires a String or ClaudeContainerParams, got: ', aStringOrContainerParams class name ].
+			or: [ aStringOrContainerParams isClaudeContainerParams ] ])
+		ifFalse: [ self error: 'container: requires a String or ClaudeContainerParams, got: ' , aStringOrContainerParams class name ].
 	container := aStringOrContainerParams
 ]
 

@@ -44,31 +44,35 @@ ClaudeMessagingSkillsExample class >> buildContainerWithSkills [
 { #category : 'building' }
 ClaudeMessagingSkillsExample class >> buildSkillUploadDirectory [
 	"Build a sample skill directory under FileLocator temp. The directory
-	 is named 'example-skill' (matching the name: field in its SKILL.md
+	 is named ''example-skill'' (matching the name: field in its SKILL.md
 	 frontmatter, as required by the Skills API directory-name guard)
 	 and lives inside a per-call unique parent so two consecutive
 	 invocations produce distinct paths without leaking stale files.
 
-	 Returns the FileReference to the inner 'example-skill' directory.
+	 Returns the FileReference to the inner ''example-skill'' directory.
 	 Callers must clean up the PARENT (dir parent) in an ensure: block
 	 so the entire nested structure is removed -- uploadOn: does this
 	 for you."
 
-	| parent dir |
+	| parent dir lf |
+	lf := String lf.
 	parent := FileLocator temp
 		/ ('claude-example-skill-' , UUID new asString36).
 	parent createDirectory.
 	dir := parent / 'example-skill'.
 	dir createDirectory.
 	dir / 'SKILL.md' writeStreamDo: [ :s |
-		s nextPutAll: '---' , String lf
-			, 'name: example-skill' , String lf
-			, 'description: Demonstrates skill upload via the Claude Messaging SDK.' , String lf
-			, '---' , String lf , String lf
-			, '# Example Skill' , String lf , String lf
-			, 'Demonstrates skill upload via the Claude Messaging SDK.' ].
+		s
+			nextPutAll: '---'; nextPutAll: lf;
+			nextPutAll: 'name: example-skill'; nextPutAll: lf;
+			nextPutAll: 'description: Demonstrates skill upload via the Claude Messaging SDK.'; nextPutAll: lf;
+			nextPutAll: '---'; nextPutAll: lf; nextPutAll: lf;
+			nextPutAll: '# Example Skill'; nextPutAll: lf; nextPutAll: lf;
+			nextPutAll: 'Demonstrates skill upload via the Claude Messaging SDK.' ].
 	dir / 'helper.py' writeStreamDo: [ :s |
-		s nextPutAll: 'def add(a, b):' , String lf , '    return a + b' ].
+		s
+			nextPutAll: 'def add(a, b):'; nextPutAll: lf;
+			nextPutAll: '    return a + b' ].
 	^ dir
 ]
 

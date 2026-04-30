@@ -58,7 +58,11 @@ ClaudeMessagingBatchesExample class >> logCanceledOrExpired: anEntry [
 	"Log a canceled or expired batch entry to the Transcript with the outcome type."
 	| label |
 	label := anEntry isCanceled ifTrue: [ 'CANCELED' ] ifFalse: [ 'EXPIRED' ].
-	Transcript show: anEntry customId , ' ' , label; cr
+	Transcript
+		nextPutAll: anEntry customId;
+		space;
+		nextPutAll: label;
+		cr
 ]
 
 { #category : 'private' }
@@ -67,7 +71,11 @@ ClaudeMessagingBatchesExample class >> logErrored: anEntry [
 	| err message |
 	err := anEntry result error.
 	message := err ifNil: [ '<no error payload>' ] ifNotNil: [ err message ifNil: [ '<no message>' ] ].
-	Transcript show: anEntry customId , ' ERROR: ' , message; cr
+	Transcript
+		nextPutAll: anEntry customId;
+		nextPutAll: ' ERROR: ';
+		nextPutAll: message;
+		cr
 ]
 
 { #category : 'private' }
@@ -80,7 +88,11 @@ ClaudeMessagingBatchesExample class >> logSucceeded: anEntry [
 	snippet := text size > 60
 		ifTrue: [ (text first: 60) , '...' ]
 		ifFalse: [ text ].
-	Transcript show: anEntry customId , ' OK: ' , snippet; cr
+	Transcript
+		nextPutAll: anEntry customId;
+		nextPutAll: ' OK: ';
+		nextPutAll: snippet;
+		cr
 ]
 
 { #category : 'examples' }
@@ -90,7 +102,7 @@ ClaudeMessagingBatchesExample class >> run [
 	^ self runOn: ClaudeSDKExampleSupport resolveClient
 ]
 
-{ #category : 'examples' }
+{ #category : 'running' }
 ClaudeMessagingBatchesExample class >> runOn: aClaudeClient [
 	"Drive the full Batches lifecycle against the given client:
 	   1. Submit the sample batch via createBatch:
@@ -105,9 +117,19 @@ ClaudeMessagingBatchesExample class >> runOn: aClaudeClient [
 	 sees progress without an attached debugger."
 	| created |
 	created := aClaudeClient createBatch: self buildSampleCreateParams.
-	Transcript show: 'Created batch ' , created id , ' (' , created processingStatus , ')'; cr.
+	Transcript
+		nextPutAll: 'Created batch ';
+		nextPutAll: created id;
+		nextPutAll: ' (';
+		nextPutAll: created processingStatus;
+		nextPutAll: ')';
+		cr.
 	aClaudeClient pollBatch: created id untilEndedEvery: 2.
-	Transcript show: 'Batch ' , created id , ' ended; streaming results...'; cr.
+	Transcript
+		nextPutAll: 'Batch ';
+		nextPutAll: created id;
+		nextPutAll: ' ended; streaming results...';
+		cr.
 	^ aClaudeClient
 		streamBatchResults: created id
 		do: [ :entry |

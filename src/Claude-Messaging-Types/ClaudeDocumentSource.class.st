@@ -52,6 +52,25 @@ ClaudeDocumentSource >> asJson [
 ]
 
 { #category : 'accessing' }
+ClaudeDocumentSource >> data [
+	"Polymorphic default: most document sources don't carry inline data
+	 (URL, file, content sources reference the document remotely or by id).
+	 Subclasses that DO carry inline data — ClaudeBase64DocumentSource,
+	 ClaudeTextDocumentSource — override this. Returning nil here lets
+	 ClaudeDocumentBlock>>data delegate without a respondsTo: guard."
+	^ nil
+]
+
+{ #category : 'accessing' }
+ClaudeDocumentSource >> mediaType [
+	"Polymorphic default: most document sources don't advertise a media
+	 type at the source layer (URL sources let the server sniff, content
+	 sources are inline blocks). Subclasses that DO know their media type
+	 — ClaudeBase64DocumentSource, ClaudeTextDocumentSource — override."
+	^ nil
+]
+
+{ #category : 'accessing' }
 ClaudeDocumentSource >> rawDict [
   ^ rawDict
 ]
