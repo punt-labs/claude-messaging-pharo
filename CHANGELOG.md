@@ -73,6 +73,24 @@ to [Semantic Versioning](https://semver.org/).
   Messaging + ManagedAgents), not just one of its families. See
   ADR-40/41/42 in `DESIGN.md`.
 
+### Fixed
+
+- **`make lint` now lints class-side methods and method-level rules.**
+  The Makefile gate had been calling `(ReCriticEngine critiquesOf:
+  cls)` once per class, which evaluates only class-level rules on
+  the instance side and silently skips every method-level rule on
+  every method on either side. The fix walks `{ cls. cls class }`
+  and within each side calls both `critiquesOf:` (class-level rules)
+  AND `m critiques` per method (method-level rules, the actual gap).
+  The bug had existed since the Makefile was extracted from
+  `claude-agent-sdk-smalltalk`; the fix surfaced 104 previously-
+  hidden findings, all of which are cleared in this PR. The
+  spurious `Error: is the server running? (make start)` tail line
+  on clean lint output was also a Makefile bug — `grep -v` exits 1
+  on empty match and propagated through the pipeline; appending
+  `|| true` to the second grep and removing the trailing fallback
+  echo restores correct exit semantics.
+
 ## [0.5.0] - 2026-04-25
 
 ### Added
