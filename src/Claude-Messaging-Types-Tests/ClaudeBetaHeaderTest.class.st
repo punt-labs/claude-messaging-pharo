@@ -26,13 +26,14 @@ ClaudeBetaHeaderTest >> testAllKnownOrder [
 		'document-url-2025-04-15'
 		'context-1m-2025-08-07'
 		'structured-outputs-2025-11-13'
-		'interleaved-thinking-2025-05-14')
+		'interleaved-thinking-2025-05-14'
+		'message-batches-2024-09-24')
 ]
 
 { #category : 'tests' }
 ClaudeBetaHeaderTest >> testAllKnownSize [
-	"The catalog ships exactly 9 known identifiers."
-	self assert: ClaudeBetaHeader allKnown size equals: 9
+	"The catalog ships exactly 10 known identifiers."
+	self assert: ClaudeBetaHeader allKnown size equals: 10
 ]
 
 { #category : 'tests' }
@@ -58,6 +59,11 @@ ClaudeBetaHeaderTest >> testInterleavedThinking [
 { #category : 'tests' }
 ClaudeBetaHeaderTest >> testMcpClient [
 	self assert: ClaudeBetaHeader mcpClient equals: 'mcp-client-2025-04-04'
+]
+
+{ #category : 'tests' }
+ClaudeBetaHeaderTest >> testMessageBatches [
+	self assert: ClaudeBetaHeader messageBatches equals: 'message-batches-2024-09-24'
 ]
 
 { #category : 'tests' }
