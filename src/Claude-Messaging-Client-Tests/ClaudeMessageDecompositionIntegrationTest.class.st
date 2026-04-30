@@ -41,7 +41,7 @@ ClaudeMessageDecompositionIntegrationTest >> buildSimpleRequest [
 	^ req
 ]
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeMessageDecompositionIntegrationTest >> defaultTimeLimit [
 	"One live round-trip to api.anthropic.com per test plus generation time.
 	 2 minutes matches other integration tests in this package."

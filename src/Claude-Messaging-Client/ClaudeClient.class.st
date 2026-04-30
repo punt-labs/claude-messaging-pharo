@@ -1078,6 +1078,27 @@ ClaudeClient >> openTLSStreamingSocket: aClaudeMessageRequest [
 ]
 
 { #category : 'private' }
+ClaudeClient >> parseFrontmatterNameValue: aLine [
+	"Parse the value side of a `name: <value>` frontmatter line.
+	 Strips matched single- or double-quote pairs around the value;
+	 lone or mismatched quotes are left in place so the caller sees
+	 the raw oddity rather than a silently truncated name. Returns nil
+	 if the line is too short, the value is empty, or the value is
+	 still empty after quote stripping and trimming."
+	| value |
+	aLine size < 6 ifTrue: [ ^ nil ].
+	value := (aLine copyFrom: 6 to: aLine size) trimBoth.
+	value isEmpty ifTrue: [ ^ nil ].
+	(value size >= 2 and: [ value first = $" and: [ value last = $" ] ])
+		ifTrue: [ value := value copyFrom: 2 to: value size - 1 ].
+	(value size >= 2 and: [ value first = $' and: [ value last = $' ] ])
+		ifTrue: [ value := value copyFrom: 2 to: value size - 1 ].
+	value := value trimBoth.
+	value isEmpty ifTrue: [ ^ nil ].
+	^ value
+]
+
+{ #category : 'private' }
 ClaudeClient >> parseModelListResponse: jsonData [
 	"Private. Parse model list API response into structured dictionary."
 	^ Dictionary new
@@ -1164,9 +1185,8 @@ ClaudeClient >> skillNameFromFrontmatterAt: aSkillMdReference [
 	 frontmatter exists, no name: line is found, or the name value is
 	 empty. Does NOT require a full YAML parser -- we only need the
 	 leading `---` ... `---` block, and within it a simple
-	 `/^name:\s*(.+)$/` line. Matched single- or double-quote pairs are
-	 stripped. Lone or mismatched quotes are left in place so the caller
-	 sees the raw oddity rather than a silently truncated name."
+	 `/^name:\s*(.+)$/` line. See #parseFrontmatterNameValue: for the
+	 quote-stripping rules applied to the value side."
 	| lines |
 	aSkillMdReference exists ifFalse: [ ^ nil ].
 	lines := aSkillMdReference contents lines.
@@ -1176,19 +1196,49 @@ ClaudeClient >> skillNameFromFrontmatterAt: aSkillMdReference [
 		| line |
 		line := lines at: i.
 		line trimBoth = '---' ifTrue: [ ^ nil ].
-		(line beginsWith: 'name:') ifTrue: [
-			| value |
-			line size < 6 ifTrue: [ ^ nil ].
-			value := (line copyFrom: 6 to: line size) trimBoth.
-			value isEmpty ifTrue: [ ^ nil ].
-			(value size >= 2 and: [ value first = $" and: [ value last = $" ] ])
-				ifTrue: [ value := value copyFrom: 2 to: value size - 1 ].
-			(value size >= 2 and: [ value first = $' and: [ value last = $' ] ])
-				ifTrue: [ value := value copyFrom: 2 to: value size - 1 ].
-			value := value trimBoth.
-			value isEmpty ifTrue: [ ^ nil ].
-			^ value ] ].
+		(line beginsWith: 'name:')
+			ifTrue: [ ^ self parseFrontmatterNameValue: line ] ].
 	^ nil
+]
+
+{ #category : 'batches' }
+ClaudeClient >> streamBatchResults: aBatchId do: aBlock [
+	"Fetch the JSONL results for an ended batch and yield each parsed
+	 ClaudeBatchResult to aBlock. Returns an OrderedCollection of every result.
+
+	 Buffered (not incremental) for v0.6: reads the full JSONL response into
+	 memory, parses every non-empty line into a local collection, then does a
+	 single pass at the end yielding each entry to aBlock. The Anthropic
+	 results endpoint sends one complete JSON object per line over a
+	 non-chunked HTTP response, so ZnClient buffers it correctly without
+	 needing the SSE-style streaming socket. ADR-43 documents the rationale;
+	 an incremental variant can be added later if callers report memory
+	 pressure on very large batches.
+
+	 Both side effects -- aBlock invocation and results accumulation -- happen
+	 exactly once per entry, after the response is fully and successfully
+	 parsed. If executeWithRetry: retries the GET (e.g., a transient 5xx),
+	 the partially-parsed entries from the failed attempt are discarded and
+	 the caller never sees duplicates.
+
+	 Raises ClaudeBatchNotEndedError if resultsUrl is nil (batch hasn't
+	 ended yet -- poll getBatch: or use pollBatch:untilEndedEvery: first)."
+	| batch |
+	batch := self getBatch: aBatchId.
+	batch resultsUrl ifNil: [ ClaudeBatchNotEndedError signal ].
+	^ self executeWithRetry: [
+		| http resp body results |
+		http := self newBatchHttpClient.
+		http
+			headerAt: 'accept' put: 'application/x-jsonl';
+			url: batch resultsUrl.
+		resp := http get; response.
+		self checkResponse: resp.
+		body := (resp contents ifNil: [ '' ]) asString.
+		results := (body lines reject: [ :line | line trimBoth isEmpty ])
+			collect: [ :line | ClaudeBatchResult fromJson: (STONJSON fromString: line) ].
+		results do: aBlock.
+		results ]
 ]
 
 { #category : 'streaming' }
@@ -1359,28 +1409,31 @@ ClaudeClient >> uploadVersionFor: aSkillId fromDirectory: aDirectoryReference [
 
 { #category : 'private' }
 ClaudeClient >> validateSkillUploadSize: aCollectionOfFiles [
-    "Reject skill uploads that exceed the per-file limit (25 MB) or the
-    total upload limit (100 MB summed across all files). Both limits are
-    enforced client-side so callers see a clear error before bytes are
-    read from disk and before the network round-trip. Uploads stream from
-    disk via ClaudeStreamingMultiPartEntity — the limits are defense in
-    depth against server-side rejection (413 Payload Too Large) and not
-    a client-side memory ceiling.
-    
-    Raises Error with the offending file basename (per-file case) or the
-    actual total size in MB (total case). The total is formatted as a
-    float with 2 decimal places so non-aligned totals report as
-    '107.50MB' rather than the Smalltalk Fraction printString
-    '(112721920/1048576)MB'."
-    | perFileLimit totalLimit totalBytes |
-    perFileLimit := self class maxSkillFileBytes.
-    totalLimit := self class maxSkillUploadBytes.
-    aCollectionOfFiles do: [ :file |
-        file size > perFileLimit ifTrue: [
-            Error signal: 'Skill file exceeds 25MB limit: ', file basename ] ].
-    totalBytes := aCollectionOfFiles inject: 0 into: [ :sum :f | sum + f size ].
-    totalBytes > totalLimit ifTrue: [
-        Error signal: 'Skill upload exceeds 100MB total limit (got ',
-            ((totalBytes / (1024 * 1024)) asFloat printShowingDecimalPlaces: 2),
-            'MB)' ]
+	"Reject skill uploads that exceed the per-file limit (25 MB) or the
+	total upload limit (100 MB summed across all files). Both limits are
+	enforced client-side so callers see a clear error before bytes are
+	read from disk and before the network round-trip. Uploads stream from
+	disk via ClaudeStreamingMultiPartEntity — the limits are defense in
+	depth against server-side rejection (413 Payload Too Large) and not
+	a client-side memory ceiling.
+
+	Raises Error with the offending file basename (per-file case) or the
+	actual total size in MB (total case). The total is formatted as a
+	float with 2 decimal places so non-aligned totals report as
+	'107.50MB' rather than the Smalltalk Fraction printString
+	'(112721920/1048576)MB'."
+	| perFileLimit totalLimit totalBytes |
+	perFileLimit := self class maxSkillFileBytes.
+	totalLimit := self class maxSkillUploadBytes.
+	aCollectionOfFiles do: [ :file |
+		file size > perFileLimit ifTrue: [
+			Error signal: (String streamContents: [ :s |
+				s nextPutAll: 'Skill file exceeds 25MB limit: '.
+				s nextPutAll: file basename ]) ] ].
+	totalBytes := aCollectionOfFiles inject: 0 into: [ :sum :f | sum + f size ].
+	totalBytes > totalLimit ifTrue: [
+		Error signal: (String streamContents: [ :s |
+			s nextPutAll: 'Skill upload exceeds 100MB total limit (got '.
+			s nextPutAll: ((totalBytes / (1024 * 1024)) asFloat printShowingDecimalPlaces: 2).
+			s nextPutAll: 'MB)' ]) ]
 ]

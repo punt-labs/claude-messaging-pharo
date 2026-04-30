@@ -78,12 +78,12 @@ ClaudeBatchErroredResult >> asJson [
 	^ dict
 ]
 
-{ #category : 'accessing' }
+{ #category : 'error handling' }
 ClaudeBatchErroredResult >> error [
 	^ error
 ]
 
-{ #category : 'accessing' }
+{ #category : 'error handling' }
 ClaudeBatchErroredResult >> error: aClaudeBatchErrorPayload [
 	error := aClaudeBatchErrorPayload
 ]

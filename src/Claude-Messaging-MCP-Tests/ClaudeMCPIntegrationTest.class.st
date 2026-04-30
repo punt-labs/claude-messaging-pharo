@@ -60,7 +60,7 @@ Class {
 	#package : 'Claude-Messaging-MCP-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeMCPIntegrationTest >> defaultTimeLimit [
 	"MCP connector round-trip issues a message request whose generation
 	 itself depends on an outbound call from Anthropic to an external MCP

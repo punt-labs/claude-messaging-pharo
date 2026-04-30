@@ -55,7 +55,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeCitationsIntegrationTest >> defaultTimeLimit [
 	"Citation extraction drives an additional pass over the input
 	 document during generation. The default 10 s test timeout fires

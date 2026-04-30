@@ -87,9 +87,9 @@ ClaudeMCPToolUseBlock >> finalizeAfterStreaming [
 	for polymorphic evolvability — each block type may evolve its finalization
 	independently as the wire protocol grows."
 	input isString ifFalse: [ ^ self ].
-	input isEmpty
-		ifTrue: [ input := Dictionary new ]
-		ifFalse: [ input := STONJSON fromString: input ]
+	input := input isEmpty
+		ifTrue: [ Dictionary new ]
+		ifFalse: [ STONJSON fromString: input ]
 ]
 
 { #category : 'accessing' }

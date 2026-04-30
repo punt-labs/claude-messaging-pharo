@@ -40,7 +40,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeRawStreamingIntegrationTest >> defaultTimeLimit [
     "A live API round-trip can take tens of seconds across regions,
      plus server generation time. 2 minutes is generous enough for

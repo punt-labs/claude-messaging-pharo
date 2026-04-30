@@ -118,7 +118,7 @@ ClaudeTextOutputFormat >> markupSuffix [
   ^ nil
 ]
 
-{ #category : 'suffix' }
+{ #category : 'accessing' }
 ClaudeTextOutputFormat >> systemPromptSuffix [
   "Return the combined encoding and markup constraint string for system prompt injection."
   ^ String streamContents: [ :s |

@@ -54,7 +54,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeThinkingIntegrationTest >> defaultTimeLimit [
 	"Extended thinking generation drives a larger maxTokens budget and
 	 the model spends additional compute producing chain-of-thought

@@ -92,31 +92,23 @@ ClaudeBatchResult >> customId: aString [ customId := aString
 
 { #category : 'testing' }
 ClaudeBatchResult >> isCanceled [
-	^ result isNil
-		ifTrue: [ false ]
-		ifFalse: [ result isCanceled ]
+	^ result ifNil: [ false ] ifNotNil: [ :r | r isCanceled ]
 ]
 
 { #category : 'testing' }
 ClaudeBatchResult >> isErrored [
-	^ result isNil
-		ifTrue: [ false ]
-		ifFalse: [ result isErrored ]
+	^ result ifNil: [ false ] ifNotNil: [ :r | r isErrored ]
 ]
 
 { #category : 'testing' }
 ClaudeBatchResult >> isExpired [
-	^ result isNil
-		ifTrue: [ false ]
-		ifFalse: [ result isExpired ]
+	^ result ifNil: [ false ] ifNotNil: [ :r | r isExpired ]
 ]
 
 { #category : 'testing' }
 ClaudeBatchResult >> isSucceeded [
 	"Delegate to the wrapped result so callers can ask the entry directly."
-	^ result isNil
-		ifTrue: [ false ]
-		ifFalse: [ result isSucceeded ]
+	^ result ifNil: [ false ] ifNotNil: [ :r | r isSucceeded ]
 ]
 
 { #category : 'printing' }

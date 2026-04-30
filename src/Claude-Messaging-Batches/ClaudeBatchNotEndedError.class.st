@@ -34,7 +34,7 @@ Class {
 	#package : 'Claude-Messaging-Batches'
 }
 
-{ #category : 'instance creation' }
+{ #category : 'exceptioninstantiator' }
 ClaudeBatchNotEndedError class >> signal [
 	"Raise this error with a fixed default message describing the cause —
 	 streamBatchResults:do: was called before the batch reached

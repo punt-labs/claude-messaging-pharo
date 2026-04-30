@@ -25,7 +25,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeGetModelIntegrationTest >> defaultTimeLimit [
 	"One live round-trip to api.anthropic.com — the /v1/models endpoint
 	 is quick but the default 10 s test timeout is still too tight for

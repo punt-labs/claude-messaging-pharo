@@ -51,7 +51,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeImageIntegrationTest >> defaultTimeLimit [
 	"Image processing drives a URL fetch, image decode, and multimodal
 	 inference pass in addition to the normal text generation. The

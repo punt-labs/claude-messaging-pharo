@@ -52,7 +52,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudePDFIntegrationTest >> defaultTimeLimit [
 	"PDF processing drives a base64 decode, document parse, and
 	 multimodal inference pass in addition to the normal text

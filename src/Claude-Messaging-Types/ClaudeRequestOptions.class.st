@@ -77,21 +77,44 @@ ClaudeRequestOptions class >> jsonKeyMap [
 	} asDictionary
 ]
 
-{ #category : 'JSON' }
+{ #category : 'private' }
+ClaudeRequestOptions >> addContainerFieldTo: dict [
+	"Container slot serializes either as a String container ID (back-compat)
+	 or as a ClaudeContainerParams via asJson."
+	container ifNil: [ ^ self ].
+	dict at: 'container' put: (container isString
+		ifTrue: [ container ]
+		ifFalse: [ container asJson ])
+]
+
+{ #category : 'json' }
 ClaudeRequestOptions >> addFieldsTo: dict [
+	"Emit each non-nil request option as a snake_case wire key into the
+	 caller's wire-Dictionary. Each axis (routing, container, mcp,
+	 streaming) is handled by a private helper to keep the body short
+	 and the field set readable."
 	metadata ifNotNil: [ dict at: 'metadata' put: metadata ].
+	self addRoutingFieldsTo: dict.
+	self addContainerFieldTo: dict.
+	speed ifNotNil: [ dict at: 'speed' put: speed ].
+	self addMcpServersTo: dict.
+	(stream notNil and: [ stream ]) ifTrue: [ dict at: 'stream' put: true ]
+]
+
+{ #category : 'private' }
+ClaudeRequestOptions >> addMcpServersTo: dict [
+	"MCP servers serialize as an Array of asJson dictionaries."
+	(mcpServers notNil and: [ mcpServers notEmpty ]) ifFalse: [ ^ self ].
+	dict at: 'mcp_servers' put: (mcpServers collect: [ :s | s asJson ]) asArray
+]
+
+{ #category : 'private' }
+ClaudeRequestOptions >> addRoutingFieldsTo: dict [
+	"Cache, service tier, eager streaming, inference geo — request routing controls."
 	cacheControl ifNotNil: [ dict at: 'cache_control' put: cacheControl ].
 	serviceTier ifNotNil: [ dict at: 'service_tier' put: serviceTier ].
 	eagerInputStreaming ifNotNil: [ dict at: 'eager_input_streaming' put: eagerInputStreaming ].
-	inferenceGeo ifNotNil: [ dict at: 'inference_geo' put: inferenceGeo ].
-	container ifNotNil: [
-		dict at: 'container' put: (container isString
-			ifTrue: [ container ]
-			ifFalse: [ container asJson ]) ].
-	speed ifNotNil: [ dict at: 'speed' put: speed ].
-	(mcpServers notNil and: [ mcpServers notEmpty ]) ifTrue: [
-		dict at: 'mcp_servers' put: (mcpServers collect: [ :s | s asJson ]) asArray ].
-	(stream notNil and: [ stream ]) ifTrue: [ dict at: 'stream' put: true ]
+	inferenceGeo ifNotNil: [ dict at: 'inference_geo' put: inferenceGeo ]
 ]
 
 { #category : 'accessing' }

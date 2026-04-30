@@ -51,7 +51,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudePromptCachingIntegrationTest >> defaultTimeLimit [
 	"Two live round-trips to api.anthropic.com plus model generation time
 	 on each. The default 10 s test timeout fires before a healthy

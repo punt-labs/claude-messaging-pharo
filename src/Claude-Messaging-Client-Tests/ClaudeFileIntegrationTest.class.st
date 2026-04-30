@@ -22,7 +22,7 @@ Class {
 	#package : 'Claude-Messaging-Client-Tests'
 }
 
-{ #category : 'running' }
+{ #category : 'accessing' }
 ClaudeFileIntegrationTest >> defaultTimeLimit [
     "Raise the default 10s limit for integration tests — 10 MB upload can take up to a minute over the wire."
     ^ 5 minutes
