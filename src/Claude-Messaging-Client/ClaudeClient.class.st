@@ -441,13 +441,23 @@ ClaudeClient >> appendQueryParams: aDictionary toUrl: aUrl [
 	 page tokens containing reserved characters survive transport. Returns the
 	 new URL string; empty/nil dictionary returns aUrl unchanged. Three-strikes
 	 extraction from listFiles:, listSkills:, and listVersionsFor:params:."
-	| parts separator |
+	| query separator |
 	(aDictionary isNil or: [ aDictionary isEmpty ]) ifTrue: [ ^ aUrl ].
-	parts := OrderedCollection new.
-	aDictionary keys asSortedCollection do: [ :k |
-		parts add: k, '=', (aDictionary at: k) urlEncoded ].
+	query := String streamContents: [ :s |
+		| first |
+		first := true.
+		aDictionary keys asSortedCollection do: [ :k |
+			first
+				ifTrue: [ first := false ]
+				ifFalse: [ s nextPutAll: '&' ].
+			s nextPutAll: k.
+			s nextPutAll: '='.
+			s nextPutAll: (aDictionary at: k) urlEncoded ] ].
 	separator := (aUrl indexOf: $?) > 0 ifTrue: [ '&' ] ifFalse: [ '?' ].
-	^ aUrl, separator, (parts joinUsing: '&')
+	^ String streamContents: [ :s |
+		s nextPutAll: aUrl.
+		s nextPutAll: separator.
+		s nextPutAll: query ]
 ]
 
 { #category : 'private' }
@@ -1199,6 +1209,46 @@ ClaudeClient >> skillNameFromFrontmatterAt: aSkillMdReference [
 		(line beginsWith: 'name:')
 			ifTrue: [ ^ self parseFrontmatterNameValue: line ] ].
 	^ nil
+]
+
+{ #category : 'batches' }
+ClaudeClient >> streamBatchResults: aBatchId do: aBlock [
+	"Fetch the JSONL results for an ended batch and yield each parsed
+	 ClaudeBatchResult to aBlock. Returns an OrderedCollection of every result.
+
+	 Buffered (not incremental) for v0.6: reads the full JSONL response into
+	 memory, parses every non-empty line into a local collection, then does a
+	 single pass at the end yielding each entry to aBlock. The Anthropic
+	 results endpoint sends one complete JSON object per line over a
+	 non-chunked HTTP response, so ZnClient buffers it correctly without
+	 needing the SSE-style streaming socket. ADR-43 documents the rationale;
+	 an incremental variant can be added later if callers report memory
+	 pressure on very large batches.
+
+	 Both side effects -- aBlock invocation and results accumulation -- happen
+	 exactly once per entry, after the response is fully and successfully
+	 parsed. If executeWithRetry: retries the GET (e.g., a transient 5xx),
+	 the partially-parsed entries from the failed attempt are discarded and
+	 the caller never sees duplicates.
+
+	 Raises ClaudeBatchNotEndedError if resultsUrl is nil (batch hasn't
+	 ended yet -- poll getBatch: or use pollBatch:untilEndedEvery: first)."
+	| batch |
+	batch := self getBatch: aBatchId.
+	batch resultsUrl ifNil: [ ClaudeBatchNotEndedError signal ].
+	^ self executeWithRetry: [
+		| http resp body results |
+		http := self newBatchHttpClient.
+		http
+			headerAt: 'accept' put: 'application/x-jsonl';
+			url: batch resultsUrl.
+		resp := http get; response.
+		self checkResponse: resp.
+		body := (resp contents ifNil: [ '' ]) asString.
+		results := (body lines reject: [ :line | line trimBoth isEmpty ])
+			collect: [ :line | ClaudeBatchResult fromJson: (STONJSON fromString: line) ].
+		results do: aBlock.
+		results ]
 ]
 
 { #category : 'streaming' }
