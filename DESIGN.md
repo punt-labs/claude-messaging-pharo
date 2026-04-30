@@ -519,3 +519,45 @@ package (`Claude-ManagedAgents-Sessions-Tests`), not in
 `Claude-Messaging-Client-Tests`. The host class's package can
 be loaded without the extensions; the extensions cannot be
 loaded without the host class.
+
+---
+
+## ADR-43 — JSONL results via buffered line reader, not `ClaudeStreamingSocket`
+
+**Status:** SETTLED 2026-04-30
+
+**Context:** `streamBatchResults:do:` fetches the JSONL results body
+for an ended batch and yields each entry to a caller block. The
+synchronous Messages API streams via `ClaudeStreamingSocket`, a raw
+TLS socket reader for SSE with chunked transfer-encoding (ADR-11).
+The question was whether to reuse that machinery for the Batches
+results endpoint or build a simpler buffered reader.
+
+**Decision:** `streamBatchResults:do:` reads the JSONL results body
+using a buffered line reader on the `ZnClient` response entity. It
+does not reuse `ClaudeStreamingSocket`. The full body is parsed
+into a local collection first; then a single pass yields each
+entry to `aBlock` and accumulates the returned `OrderedCollection`.
+
+**Rationale:** SSE streaming requires chunked transfer-encoding
+support and incremental event parsing. JSONL results for Batches
+are a plain HTTP GET response; the server writes the full file and
+closes the connection. `ZnClient` buffers the body correctly for
+this use case. A raw TLS socket would add complexity with no
+benefit. Parse-then-iterate also makes a structural guarantee
+against the Bugbot MEDIUM duplication finding: if
+`executeWithRetry:` retries the GET (e.g., a transient 5xx), the
+partially-parsed entries from the failed attempt are discarded
+before any callback fires, so callers cannot see duplicates.
+
+**Rejected alternative:** New `ClaudeJSONLDecoder` class mirroring
+`ClaudeSSEDecoder`. The batch results endpoint does not use
+chunked transfer-encoding, so the complexity of a streaming
+decoder is unnecessary. If a future Anthropic endpoint returns
+incremental JSONL over a long-lived connection, a decoder class
+becomes warranted at that point.
+
+**Consequences:** `streamBatchResults:do:` loads the full response
+into memory before iteration. For batches with tens of thousands
+of results, this can be 10–100 MB. Acceptable for v0.6; a chunked
+variant can be added if callers report memory pressure.
