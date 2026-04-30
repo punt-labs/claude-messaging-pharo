@@ -46,8 +46,11 @@ ClaudeBatchClientTest >> sampleEndedBatchJson [
 
 { #category : 'running' }
 ClaudeBatchClientTest >> setUp [
-	"Allocate a fresh port per test from a wide ephemeral range. Ports below 19000 collide
-	 with other repository test classes; this range is reserved for batch-client tests."
+	"Allocate a fresh port per test from the 18500-18599 range. Wide enough that
+	 same-port reuse is unlikely within a single test run, narrow enough to stay
+	 inside the standard testing port window. Combined with the 50ms post-stop
+	 delay in tearDown, ensures the OS has released the previous port before the
+	 next test grabs one."
 	port := 18500 + 100 atRandom.
 	server := ClaudeMockServer startOn: port.
 	client := ClaudeClient apiKey: 'test-key'.

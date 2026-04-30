@@ -13,6 +13,18 @@ Class {
 }
 
 { #category : 'tests' }
+ClaudeBatchErroredResultTest >> testAsJsonWhenErrorNilOmitsKey [
+	"asJson on a partially-constructed receiver omits the 'error' key
+	 instead of raising DNU on nil — matches the ifNotNil:-omit idiom
+	 used by ClaudeBatch>>asJson."
+	| dict |
+	dict := ClaudeBatchErroredResult new asJson.
+	self assert: (dict at: 'type') equals: 'errored'.
+	self deny: (dict includesKey: 'error').
+	self assert: dict size equals: 1
+]
+
+{ #category : 'tests' }
 ClaudeBatchErroredResultTest >> testFromJsonWrapsErrorPayload [
 	| r |
 	r := ClaudeBatchErroredResult fromJson: (Dictionary newFromPairs: {

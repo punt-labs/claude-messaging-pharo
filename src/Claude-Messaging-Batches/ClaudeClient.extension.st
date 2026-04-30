@@ -117,11 +117,19 @@ ClaudeClient >> pollBatch: aBatchId untilEndedEvery: aDurationOrSeconds [
 
 { #category : '*Claude-Messaging-Batches' }
 ClaudeClient >> streamBatchResults: aBatchId do: aBlock [
-	"Fetch and parse the JSONL results for an ended batch. Calls aBlock with each
-	 ClaudeBatchResult as it arrives; returns an OrderedCollection of every result.
-	 Raises ClaudeBatchNotEndedError if resultsUrl is nil (batch hasn't ended yet —
-	 poll getBatch: or use pollBatch:untilEndedEvery: first). Defensive against
-	 a 200 with an empty body — yields no entries instead of raising on nil body."
+	"Fetch the JSONL results for an ended batch and yield each parsed
+	 ClaudeBatchResult to aBlock. Returns an OrderedCollection of every result.
+
+	 Buffered (not incremental) for v0.6: reads the full JSONL response into
+	 memory, parses each non-empty line, then yields each entry to aBlock and
+	 accumulates the OrderedCollection. The Anthropic results endpoint sends
+	 one complete JSON object per line over a non-chunked HTTP response, so
+	 ZnClient buffers it correctly without needing the SSE-style streaming
+	 socket. ADR-43 documents the rationale; an incremental variant can be
+	 added later if callers report memory pressure on very large batches.
+
+	 Raises ClaudeBatchNotEndedError if resultsUrl is nil (batch hasn't
+	 ended yet — poll getBatch: or use pollBatch:untilEndedEvery: first)."
 	| batch results |
 	batch := self getBatch: aBatchId.
 	batch resultsUrl ifNil: [ ClaudeBatchNotEndedError signal ].

@@ -47,10 +47,17 @@ ClaudeBatchSucceededResult class >> fromJson: aDictionary [
 
 { #category : 'json' }
 ClaudeBatchSucceededResult >> asJson [
-	^ OrderedDictionary new
-		at: 'type' put: 'succeeded';
-		at: 'message' put: message asJson;
-		yourself
+	"Wire shape: { 'type': 'succeeded', 'message': { <ClaudeMessage wire shape> } }.
+	 Omits the 'message' key when the slot is nil — matches the
+	 ifNotNil:-omit idiom used by ClaudeBatch>>asJson for partial objects.
+	 Production paths always populate message via fromJson: or builder code;
+	 this guard handles the partial-construction path where someone instantiates
+	 the wrapper before populating the wrapped message."
+	| dict |
+	dict := OrderedDictionary new.
+	dict at: 'type' put: 'succeeded'.
+	message ifNotNil: [ dict at: 'message' put: message asJson ].
+	^ dict
 ]
 
 { #category : 'initialization' }

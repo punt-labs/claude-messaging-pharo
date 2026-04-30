@@ -68,10 +68,14 @@ ClaudeBatchErroredResult class >> unknown: aTypeString [
 
 { #category : 'json' }
 ClaudeBatchErroredResult >> asJson [
-	^ OrderedDictionary new
-		at: 'type' put: 'errored';
-		at: 'error' put: error asJson;
-		yourself
+	"Wire shape: { 'type': 'errored', 'error': { <ClaudeBatchErrorPayload> } }.
+	 Omits the 'error' key when the slot is nil — matches the ifNotNil:-omit
+	 idiom used by ClaudeBatch>>asJson for partial objects."
+	| dict |
+	dict := OrderedDictionary new.
+	dict at: 'type' put: 'errored'.
+	error ifNotNil: [ dict at: 'error' put: error asJson ].
+	^ dict
 ]
 
 { #category : 'accessing' }

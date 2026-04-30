@@ -13,6 +13,18 @@ Class {
 }
 
 { #category : 'tests' }
+ClaudeBatchSucceededResultTest >> testAsJsonWhenMessageNilOmitsKey [
+	"asJson on a partially-constructed receiver omits the 'message' key
+	 instead of raising DNU on nil — matches the ifNotNil:-omit idiom
+	 used by ClaudeBatch>>asJson."
+	| dict |
+	dict := ClaudeBatchSucceededResult new asJson.
+	self assert: (dict at: 'type') equals: 'succeeded'.
+	self deny: (dict includesKey: 'message').
+	self assert: dict size equals: 1
+]
+
+{ #category : 'tests' }
 ClaudeBatchSucceededResultTest >> testFromJsonWrapsMessage [
 	| r |
 	r := ClaudeBatchSucceededResult fromJson: (Dictionary newFromPairs: {
