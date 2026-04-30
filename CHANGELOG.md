@@ -9,6 +9,15 @@ to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `ClaudeMessagingBatchesExample` example class demonstrating the
+  full create -> poll -> stream loop with polymorphic outcome
+  dispatch via `isSucceeded`/`isErrored`/`isCanceled`/`isExpired`
+  predicates. Mirrors the Skills/MCP example shape with a pure
+  doctestable `buildSampleCreateParams` and a `runOn:` entry that
+  drives the full Batches lifecycle. Five structural tests in
+  `ClaudeMessagingBatchesExampleTest` cover the build helper shape,
+  Haiku/maxTokens choice, JSON wire round-trip, and selector
+  presence.
 - **Batches API** (`Claude-Messaging-Batches`): the Anthropic Message
   Batches surface for async submission and JSONL results retrieval.
   - `ClaudeClient` extension methods (per ADR-42, in
